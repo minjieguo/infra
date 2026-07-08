@@ -10,8 +10,6 @@ import (
 	"gorm.io/gorm/schema"
 )
 
-var client *gorm.DB
-
 // Config 数据库配置
 type Config struct {
 	Type   string
@@ -20,18 +18,23 @@ type Config struct {
 	Logger gormlogger.Interface
 }
 
-func New(cfg Config) error {
+// Client 数据库客户端。
+type Client struct {
+	db *gorm.DB
+}
+
+func New(cfg Config) (*Client, error) {
 	var dialector gorm.Dialector
 	switch cfg.Type {
 	case "sqlite":
 		dialector = sqlite.Open("./data/" + cfg.DSN)
 	case "postgres":
 		if cfg.DSN == "" {
-			return fmt.Errorf("postgres dns is null")
+			return nil, fmt.Errorf("postgres dns is null")
 		}
 		dialector = postgres.Open(cfg.DSN)
 	default:
-		return fmt.Errorf("undefined db type:%s", cfg.Type)
+		return nil, fmt.Errorf("undefined db type:%s", cfg.Type)
 	}
 
 	db, err := gorm.Open(dialector, &gorm.Config{
@@ -40,24 +43,26 @@ func New(cfg Config) error {
 		Logger:                                   cfg.Logger,
 	})
 	if err != nil {
-		return fmt.Errorf("连接数据库失败: %w", err)
+		return nil, fmt.Errorf("连接数据库失败: %w", err)
 	}
 
-	client = db
-	return nil
+	return &Client{db: db}, nil
 }
 
-func Close() error {
-	if client == nil {
+func (c *Client) Close() error {
+	if c == nil || c.db == nil {
 		return nil
 	}
-	db, err := client.DB()
+	db, err := c.db.DB()
 	if err != nil {
 		return err
 	}
 	return db.Close()
 }
 
-func DB() *gorm.DB {
-	return client.Session(&gorm.Session{NewDB: true})
+func (c *Client) DB() *gorm.DB {
+	if c == nil || c.db == nil {
+		return nil
+	}
+	return c.db.Session(&gorm.Session{NewDB: true})
 }

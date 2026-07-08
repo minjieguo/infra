@@ -21,38 +21,39 @@ type Config struct {
 	Logger         Logger                             // 日志
 }
 
-var (
+// Client MQTT 客户端。
+type Client struct {
 	client *autopaho.ConnectionManager
 	logger Logger
-)
+}
 
 // New 初始化 MQTT 连接
-func New(cfg Config) error {
-
-	if cfg.Logger == nil {
+func New(cfg Config) (*Client, error) {
+	logger := cfg.Logger
+	if logger == nil {
 		logger = defaultLogger{}
-	} else {
-		logger = cfg.Logger
 	}
+
+	mqttClient := &Client{logger: logger}
 
 	serverURL, err := url.Parse(fmt.Sprintf("mqtt://%s:%d", cfg.Host, cfg.Port))
 	if err != nil {
-		return fmt.Errorf("MQTT URL 解析失败: %w", err)
+		return nil, fmt.Errorf("MQTT URL 解析失败: %w", err)
 	}
 
 	ctx := context.Background()
 
-	client, err = autopaho.NewConnection(ctx, autopaho.ClientConfig{
+	client, err := autopaho.NewConnection(ctx, autopaho.ClientConfig{
 		ServerUrls:        []*url.URL{serverURL},
 		ConnectUsername:   cfg.Username,
 		ConnectPassword:   []byte(cfg.Password),
 		KeepAlive:         30,
 		ConnectRetryDelay: 5 * time.Second,
 		OnConnectionUp: func(cm *autopaho.ConnectionManager, _ *paho.Connack) {
-			logger.Info("MQTT Connected")
+			mqttClient.logger.Info("MQTT Connected")
 		},
 		OnConnectError: func(err error) {
-			logger.Error("MQTT Connection Error:%s", err.Error())
+			mqttClient.logger.Error("MQTT Connection Error:%s", err.Error())
 		},
 		ClientConfig: paho.ClientConfig{
 			ClientID: fmt.Sprintf("go_mqtt_client_%d", time.Now().UnixMilli()),
@@ -70,24 +71,25 @@ func New(cfg Config) error {
 		},
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
+	mqttClient.client = client
 
 	waitCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	if err = client.AwaitConnection(waitCtx); err != nil {
-		logger.Warn("MQTT Initial Connection Timeout, will keep reconnecting in background: %s", err.Error())
+	if err = mqttClient.client.AwaitConnection(waitCtx); err != nil {
+		mqttClient.logger.Warn("MQTT Initial Connection Timeout, will keep reconnecting in background: %s", err.Error())
 	}
 
-	return nil
+	return mqttClient, nil
 }
 
 // Close 关闭 MQTT 连接
-func Close() error {
-	if client != nil {
+func (c *Client) Close() error {
+	if c != nil && c.client != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if err := client.Disconnect(ctx); err != nil {
+		if err := c.client.Disconnect(ctx); err != nil {
 			return err
 		}
 	}
@@ -95,11 +97,11 @@ func Close() error {
 }
 
 // Subscribe 订阅主题
-func Subscribe(topic string, qos byte) error {
-	if client == nil {
+func (c *Client) Subscribe(topic string, qos byte) error {
+	if c == nil || c.client == nil {
 		return errors.New("client not initialized")
 	}
-	_, err := client.Subscribe(context.Background(), &paho.Subscribe{
+	_, err := c.client.Subscribe(context.Background(), &paho.Subscribe{
 		Subscriptions: []paho.SubscribeOptions{{Topic: topic, QoS: qos}},
 	})
 	if err != nil {
@@ -109,8 +111,11 @@ func Subscribe(topic string, qos byte) error {
 }
 
 // Publish 发布消息
-func Publish(topic string, payload []byte, qos byte, retain bool) error {
-	_, err := client.Publish(context.Background(), &paho.Publish{
+func (c *Client) Publish(topic string, payload []byte, qos byte, retain bool) error {
+	if c == nil || c.client == nil {
+		return errors.New("client not initialized")
+	}
+	_, err := c.client.Publish(context.Background(), &paho.Publish{
 		Topic:   topic,
 		QoS:     qos,
 		Retain:  retain,

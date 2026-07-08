@@ -15,23 +15,24 @@ type Config struct {
 	BaseDir string // 上传的前缀文件夹,不能为空
 }
 
-var (
-	baseURL string // 文件访问的前缀 URL，为空时返回相对路径
-	baseDir string // 上传的前缀文件夹,不能为空
-)
+// Client OSS 客户端。
+type Client struct {
+	baseURL string
+	baseDir string
+}
 
-func New(cfg Config) error {
-	baseURL = cfg.BaseURL
-	baseDir = cfg.BaseDir
-
-	if err := os.MkdirAll(baseDir, 0755); err != nil {
-		return fmt.Errorf("创建上传目录失败: %v", err)
+func New(cfg Config) (*Client, error) {
+	if err := os.MkdirAll(cfg.BaseDir, 0755); err != nil {
+		return nil, fmt.Errorf("创建上传目录失败: %v", err)
 	}
-	return nil
+	return &Client{
+		baseURL: cfg.BaseURL,
+		baseDir: cfg.BaseDir,
+	}, nil
 }
 
 // 保存文件
-func SaveFile(path string, suffix, b64 string) (string, error) {
+func (c *Client) SaveFile(path string, suffix, b64 string) (string, error) {
 
 	data, err := base64.StdEncoding.DecodeString(b64)
 	if err != nil {
@@ -41,7 +42,7 @@ func SaveFile(path string, suffix, b64 string) (string, error) {
 	monthPath := time.Now().Format("200601")
 	fileName := fmt.Sprintf("%s_%d.%s", monthPath, time.Now().UnixNano(), suffix)
 
-	directory := filepath.Join(baseDir, path, monthPath)
+	directory := filepath.Join(c.baseDir, path, monthPath)
 
 	// 检查目录是否存在，不存在则创建
 	if _, err := os.Stat(directory); os.IsNotExist(err) {
@@ -63,20 +64,20 @@ func SaveFile(path string, suffix, b64 string) (string, error) {
 }
 
 // 获取文件url
-func GetFileUrl(path, name string) string {
+func (c *Client) GetFileUrl(path, name string) string {
 	if name == "" {
 		return ""
 	}
-	return baseURL + "/" + baseDir + "/" + path + "/" + strings.Split(name, "_")[0] + "/" + name
+	return c.baseURL + "/" + c.baseDir + "/" + path + "/" + strings.Split(name, "_")[0] + "/" + name
 }
 
 // 删除文件
-func DelFile(path, name string) {
+func (c *Client) DelFile(path, name string) {
 	if name == "" {
 		return
 	}
 
-	filePath := filepath.Join(baseDir, path, strings.Split(name, "_")[0], name)
+	filePath := filepath.Join(c.baseDir, path, strings.Split(name, "_")[0], name)
 
 	os.Remove(filePath)
 }

@@ -21,58 +21,62 @@ type Config struct {
 	Prefix   string
 }
 
-var client Store
+// Client 缓存客户端。
+type Client struct {
+	store Cache
+}
 
 // New 初始化缓存客户端。
-func New(cfg Config) error {
+func New(cfg Config) (*Client, error) {
 	cacheType := strings.TrimSpace(strings.ToLower(cfg.Type))
 	if cacheType == "" {
 		cacheType = TypeMemory
 	}
 
+	var store Cache
 	switch cacheType {
 	case TypeMemory:
-		client = newMemoryStore()
+		store = newMemoryStore()
 	case TypeRedis:
-		store, err := newRedisStore(cfg)
+		redisStore, err := newRedisStore(cfg)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		client = store
+		store = redisStore
 	default:
-		return fmt.Errorf("undefined cache type:%s", cfg.Type)
+		return nil, fmt.Errorf("undefined cache type:%s", cfg.Type)
 	}
-	return nil
+	return &Client{store: store}, nil
 }
 
 // Set 写入缓存。
-func Set(ctx context.Context, key string, value string, ttl time.Duration) error {
-	if client == nil {
+func (c *Client) Set(ctx context.Context, key string, value string, ttl time.Duration) error {
+	if c == nil || c.store == nil {
 		return fmt.Errorf("cache is not initialized")
 	}
-	return client.Set(ctx, key, value, ttl)
+	return c.store.Set(ctx, key, value, ttl)
 }
 
 // Get 读取缓存。
-func Get(ctx context.Context, key string) (string, bool, error) {
-	if client == nil {
+func (c *Client) Get(ctx context.Context, key string) (string, bool, error) {
+	if c == nil || c.store == nil {
 		return "", false, fmt.Errorf("cache is not initialized")
 	}
-	return client.Get(ctx, key)
+	return c.store.Get(ctx, key)
 }
 
 // Delete 删除缓存。
-func Delete(ctx context.Context, key string) error {
-	if client == nil {
+func (c *Client) Delete(ctx context.Context, key string) error {
+	if c == nil || c.store == nil {
 		return fmt.Errorf("cache is not initialized")
 	}
-	return client.Delete(ctx, key)
+	return c.store.Delete(ctx, key)
 }
 
 // Close 关闭缓存客户端。
-func Close() error {
-	if client == nil {
+func (c *Client) Close() error {
+	if c == nil || c.store == nil {
 		return nil
 	}
-	return client.Close()
+	return c.store.Close()
 }
