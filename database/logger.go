@@ -25,7 +25,7 @@ type Logger struct {
 	writer        LogWriter
 }
 
-func NewGormLogger(writer LogWriter, debug bool) *Logger {
+func newLogger(writer LogWriter, debug bool) *Logger {
 	level := logger.Warn
 	if debug {
 		level = logger.Info
@@ -36,10 +36,6 @@ func NewGormLogger(writer LogWriter, debug bool) *Logger {
 		debug:         debug,
 		writer:        writer,
 	}
-}
-
-func NewLogger(writer LogWriter, debug bool) *Logger {
-	return NewGormLogger(writer, debug)
 }
 
 func (l *Logger) LogMode(level logger.LogLevel) logger.Interface {

@@ -6,7 +6,6 @@ import (
 	"github.com/glebarez/sqlite"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
-	gormlogger "gorm.io/gorm/logger"
 	"gorm.io/gorm/schema"
 )
 
@@ -15,7 +14,7 @@ type Config struct {
 	Type   string
 	DSN    string
 	Debug  bool
-	Logger gormlogger.Interface
+	Logger LogWriter
 }
 
 // Client 数据库客户端。
@@ -40,7 +39,7 @@ func New(cfg Config) (*Client, error) {
 	db, err := gorm.Open(dialector, &gorm.Config{
 		DisableForeignKeyConstraintWhenMigrating: true,
 		NamingStrategy:                           schema.NamingStrategy{SingularTable: true},
-		Logger:                                   cfg.Logger,
+		Logger:                                   newLogger(cfg.Logger, cfg.Debug),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("连接数据库失败: %w", err)

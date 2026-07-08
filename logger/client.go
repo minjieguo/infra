@@ -10,7 +10,7 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
-// Config MQTT 配置
+// Config 日志配置。
 type Config struct {
 	Stdout       bool          // 输出到控制台
 	Path         string        // 日志路径: 默认  logs
@@ -18,10 +18,12 @@ type Config struct {
 	RotationTime time.Duration // 切割文件的规则 默认每天
 }
 
-var logger *zap.Logger = zap.NewNop()
+// Client 日志客户端。
+type Client struct {
+	logger *zap.Logger
+}
 
-func New(cfg Config) error {
-
+func New(cfg Config) (*Client, error) {
 	if cfg.Path == "" {
 		cfg.Path = "logs"
 	}
@@ -35,7 +37,7 @@ func New(cfg Config) error {
 	// 日志文件
 	err := os.MkdirAll(cfg.Path, os.ModePerm)
 	if err != nil {
-		return fmt.Errorf("创建日志目录失败: %w", err)
+		return nil, fmt.Errorf("创建日志目录失败: %w", err)
 	}
 
 	// 日志输出
@@ -45,7 +47,7 @@ func New(cfg Config) error {
 		rotatelogs.WithRotationTime(cfg.RotationTime), //
 	)
 	if err != nil {
-		return fmt.Errorf("创建日志日志输出Info失败: %w", err)
+		return nil, fmt.Errorf("创建日志输出失败: %w", err)
 	}
 
 	// 编码器配置（文本格式）
@@ -65,26 +67,32 @@ func New(cfg Config) error {
 	}
 	core := zapcore.NewTee(tree...)
 
-	logger = zap.New(core, zap.AddCaller())
-	return nil
+	return &Client{logger: zap.New(core, zap.AddCaller())}, nil
 }
 
-func Info(msg string, fields ...zap.Field) {
-	logger.Info(msg, fields...)
+func (c *Client) Info(msg string, fields ...zap.Field) {
+	c.zap().Info(msg, fields...)
 }
 
-func Warn(msg string, fields ...zap.Field) {
-	logger.Warn(msg, fields...)
+func (c *Client) Warn(msg string, fields ...zap.Field) {
+	c.zap().Warn(msg, fields...)
 }
 
-func Error(msg string, fields ...zap.Field) {
-	logger.Error(msg, fields...)
+func (c *Client) Error(msg string, fields ...zap.Field) {
+	c.zap().Error(msg, fields...)
 }
 
-func Sync() {
-	logger.Sync()
+func (c *Client) Sync() error {
+	return c.zap().Sync()
 }
 
-func Sugar() *zap.SugaredLogger {
-	return logger.Sugar()
+func (c *Client) Sugar() *zap.SugaredLogger {
+	return c.zap().Sugar()
+}
+
+func (c *Client) zap() *zap.Logger {
+	if c == nil || c.logger == nil {
+		return zap.NewNop()
+	}
+	return c.logger
 }
