@@ -46,23 +46,70 @@ func (c *Client) NewQueryBuilder() *QueryBuilder {
 	return NewQueryBuilder()
 }
 
-func (qb *QueryBuilder) Where(field string, operator QueryOperator, value any) {
+func (qb *QueryBuilder) Where(field string, operator QueryOperator, value any) *QueryBuilder {
 	qb.where = append(qb.where, Condition{
 		Field:    field,
 		Operator: operator,
 		Value:    value,
 	})
+	return qb
 }
 
-func (qb *QueryBuilder) Or(conditions []Condition) {
+func (qb *QueryBuilder) WhereEqual(field string, value any) *QueryBuilder {
+	return qb.Where(field, OpEqual, value)
+}
+
+func (qb *QueryBuilder) WhereNotEqual(field string, value any) *QueryBuilder {
+	return qb.Where(field, OpNotEqual, value)
+}
+
+func (qb *QueryBuilder) WhereGreaterThan(field string, value any) *QueryBuilder {
+	return qb.Where(field, OpBetterThan, value)
+}
+
+func (qb *QueryBuilder) WhereGreaterOrEqual(field string, value any) *QueryBuilder {
+	return qb.Where(field, OpBetterOrEqual, value)
+}
+
+func (qb *QueryBuilder) WhereLessThan(field string, value any) *QueryBuilder {
+	return qb.Where(field, OpLessThan, value)
+}
+
+func (qb *QueryBuilder) WhereLessOrEqual(field string, value any) *QueryBuilder {
+	return qb.Where(field, OpLessOrEqual, value)
+}
+
+func (qb *QueryBuilder) WhereLike(field string, value any) *QueryBuilder {
+	return qb.Where(field, OpLike, value)
+}
+
+func (qb *QueryBuilder) WhereNotLike(field string, value any) *QueryBuilder {
+	return qb.Where(field, OpNotLike, value)
+}
+
+func (qb *QueryBuilder) WhereIn(field string, value any) *QueryBuilder {
+	return qb.Where(field, OpIn, value)
+}
+
+func (qb *QueryBuilder) WhereNotIn(field string, value any) *QueryBuilder {
+	return qb.Where(field, OpNotIn, value)
+}
+
+func (qb *QueryBuilder) WhereIsNull(field string) *QueryBuilder {
+	return qb.Where(field, OpIsNull, nil)
+}
+
+func (qb *QueryBuilder) Or(conditions []Condition) *QueryBuilder {
 	qb.or = append(qb.or, conditions)
+	return qb
 }
 
-func (qb *QueryBuilder) Order(expr string) {
+func (qb *QueryBuilder) Order(expr string) *QueryBuilder {
 	qb.order = append(qb.order, expr)
+	return qb
 }
 
-func (qb *QueryBuilder) Paging(index, size int, count *int64) {
+func (qb *QueryBuilder) Paging(index, size int, count *int64) *QueryBuilder {
 	if index <= 0 {
 		index = 1
 	}
@@ -73,6 +120,7 @@ func (qb *QueryBuilder) Paging(index, size int, count *int64) {
 		size = 1000
 	}
 	qb.paging = &pagingParam{index: index, size: size, count: count}
+	return qb
 }
 
 func (qb *QueryBuilder) Build(client *Client) *gorm.DB {
