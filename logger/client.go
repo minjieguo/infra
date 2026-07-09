@@ -70,20 +70,20 @@ func New(cfg Config) (*Client, error) {
 	return &Client{logger: zap.New(core, zap.AddCaller())}, nil
 }
 
-func (c *Client) Debug(msg string, fields ...Field) {
-	c.zap().Debug(msg, toZapFields(fields)...)
+func (c *Client) Debug(msg string, fields ...zap.Field) {
+	c.zap().Debug(msg, fields...)
 }
 
-func (c *Client) Info(msg string, fields ...Field) {
-	c.zap().Info(msg, toZapFields(fields)...)
+func (c *Client) Info(msg string, fields ...zap.Field) {
+	c.zap().Info(msg, fields...)
 }
 
-func (c *Client) Warn(msg string, fields ...Field) {
-	c.zap().Warn(msg, toZapFields(fields)...)
+func (c *Client) Warn(msg string, fields ...zap.Field) {
+	c.zap().Warn(msg, fields...)
 }
 
-func (c *Client) Error(msg string, fields ...Field) {
-	c.zap().Error(msg, toZapFields(fields)...)
+func (c *Client) Error(msg string, fields ...zap.Field) {
+	c.zap().Error(msg, fields...)
 }
 
 func (c *Client) Sync() error {

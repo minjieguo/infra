@@ -9,6 +9,8 @@ import (
 
 	"github.com/eclipse/paho.golang/autopaho"
 	"github.com/eclipse/paho.golang/paho"
+	"github.com/minjieguo/infra/logger"
+	"go.uber.org/zap"
 )
 
 // Config MQTT 配置
@@ -18,23 +20,23 @@ type Config struct {
 	Username       string                             // 用户名,可为空
 	Password       string                             // 密码,可为空
 	ReceiveHandler func(string, []byte) (bool, error) // 消息接收事件
-	Logger         Logger                             // 日志
+	Logger         logger.Logger                      // 日志
 }
 
 // Client MQTT 客户端。
 type Client struct {
 	client *autopaho.ConnectionManager
-	logger Logger
+	logger logger.Logger
 }
 
 // New 初始化 MQTT 连接
 func New(cfg Config) (*Client, error) {
-	logger := cfg.Logger
-	if logger == nil {
-		logger = defaultLogger{}
-	}
+	// logger := cfg.Logger
+	// if logger == nil {
+	// 	logger = defaultLogger{}
+	// }
 
-	mqttClient := &Client{logger: logger}
+	mqttClient := &Client{logger: cfg.Logger}
 
 	serverURL, err := url.Parse(fmt.Sprintf("mqtt://%s:%d", cfg.Host, cfg.Port))
 	if err != nil {
@@ -53,7 +55,7 @@ func New(cfg Config) (*Client, error) {
 			mqttClient.logger.Info("MQTT Connected")
 		},
 		OnConnectError: func(err error) {
-			mqttClient.logger.Error("MQTT Connection Error:%s", err.Error())
+			mqttClient.logger.Error("MQTT Connection Error:%s", zap.Error(err))
 		},
 		ClientConfig: paho.ClientConfig{
 			ClientID: fmt.Sprintf("go_mqtt_client_%d", time.Now().UnixMilli()),
@@ -78,7 +80,7 @@ func New(cfg Config) (*Client, error) {
 	waitCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	if err = mqttClient.client.AwaitConnection(waitCtx); err != nil {
-		mqttClient.logger.Warn("MQTT Initial Connection Timeout, will keep reconnecting in background: %s", err.Error())
+		mqttClient.logger.Warn("MQTT Initial Connection Timeout, will keep reconnecting in background: %s", zap.Error(err))
 	}
 
 	return mqttClient, nil
