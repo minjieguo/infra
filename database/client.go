@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/glebarez/sqlite"
+	infralogger "github.com/minjieguo/infra/logger"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/schema"
@@ -14,7 +15,7 @@ type Config struct {
 	Type   string
 	DSN    string
 	Debug  bool
-	Logger LogWriter
+	Logger infralogger.Logger
 }
 
 // Client 数据库客户端。
