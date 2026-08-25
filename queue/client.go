@@ -153,7 +153,7 @@ func (c *Client) SendMessage(msg *sarama.ProducerMessage) (partition int32, offs
 	if err != nil {
 		c.logger.Error("发送失败", zap.Error(err))
 	} else {
-		c.logger.Info("发送成功",
+		c.logger.Debug("发送成功",
 			zap.String("topic", msg.Topic),
 			zap.Int32("partition", partition),
 			zap.Int64("offset", offset),
