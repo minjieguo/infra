@@ -12,6 +12,7 @@ import (
 
 // Config 日志配置。
 type Config struct {
+	Level        zapcore.Level // 日志等级: 默认 InfoLevel
 	Stdout       bool          // 输出到控制台
 	Path         string        // 日志路径: 默认  logs
 	MaxAge       time.Duration // 保留日志的时间 默认90天
@@ -60,10 +61,10 @@ func New(cfg Config) (*Client, error) {
 	encoder := zapcore.NewConsoleEncoder(encoderConfig)
 
 	tree := make([]zapcore.Core, 0)
-	tree = append(tree, zapcore.NewCore(encoder, zapcore.AddSync(writer), zap.InfoLevel))
+	tree = append(tree, zapcore.NewCore(encoder, zapcore.AddSync(writer), cfg.Level))
 	//输出控制台
 	if cfg.Stdout {
-		tree = append(tree, zapcore.NewCore(encoder, zapcore.AddSync(os.Stdout), zap.InfoLevel))
+		tree = append(tree, zapcore.NewCore(encoder, zapcore.AddSync(os.Stdout), cfg.Level))
 	}
 	core := zapcore.NewTee(tree...)
 
