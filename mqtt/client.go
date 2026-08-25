@@ -46,11 +46,11 @@ func New(cfg Config) (*Client, error) {
 	ctx := context.Background()
 
 	client, err := autopaho.NewConnection(ctx, autopaho.ClientConfig{
-		ServerUrls:        []*url.URL{serverURL},
-		ConnectUsername:   cfg.Username,
-		ConnectPassword:   []byte(cfg.Password),
-		KeepAlive:         30,
-		ConnectRetryDelay: 5 * time.Second,
+		ServerUrls:       []*url.URL{serverURL},
+		ConnectUsername:  cfg.Username,
+		ConnectPassword:  []byte(cfg.Password),
+		KeepAlive:        30,
+		ReconnectBackoff: autopaho.NewConstantBackoff(5 * time.Second),
 		OnConnectionUp: func(cm *autopaho.ConnectionManager, _ *paho.Connack) {
 			mqttClient.logger.Info("MQTT Connected")
 		},
