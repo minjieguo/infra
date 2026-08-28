@@ -6,55 +6,16 @@ import (
 	"time"
 )
 
-// Result 等待结果。
-type Result struct {
-	Data  any
-	Error error
-}
-
 // Client 等待器客户端。
 type Client struct {
 	waiters map[int64]*waiter
 	lock    sync.Mutex
-	stop    chan struct{}
-	once    sync.Once
 }
 
-// New 创建等待器客户端，并启动后台清理线程。
+// New 创建等待器客户端。
 func New() *Client {
-	c := &Client{
+	return &Client{
 		waiters: make(map[int64]*waiter),
-		stop:    make(chan struct{}),
-	}
-	go c.cleanLoop()
-	return c
-}
-
-// cleanLoop 后台清理线程：周期性扫描 waiters，销毁已过期的注册。
-func (c *Client) cleanLoop() {
-	ticker := time.NewTicker(cleanInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case now := <-ticker.C:
-			c.purge(now)
-		case <-c.stop:
-			return
-		}
-	}
-}
-
-// purge 清理所有已过期的 waiter。
-func (c *Client) purge(now time.Time) {
-	c.lock.Lock()
-	defer c.lock.Unlock()
-
-	for seq, w := range c.waiters {
-		if w.isExpired(now) {
-			delete(c.waiters, seq)
-			close(w.ch)
-		}
 	}
 }
 
@@ -68,8 +29,7 @@ func (c *Client) Register(seq int64) {
 	}
 
 	c.waiters[seq] = &waiter{
-		ch:       make(chan Result, 1),
-		deadline: time.Now().Add(timeout),
+		ch: make(chan Result, 1),
 	}
 }
 
@@ -96,7 +56,7 @@ func (c *Client) Await(seq int64, timeout time.Duration) (*Result, error) {
 	select {
 	case result, ok := <-w.ch:
 		if !ok {
-			// 通道已被关闭且未能投递结果（例如过期销毁）。
+			// 通道已被关闭且未能投递结果（例如被 Cancel）。
 			return nil, errors.New("channel closed")
 		}
 		return &result, nil
@@ -126,9 +86,17 @@ func (c *Client) Resolve(seq int64, value Result) bool {
 	return true
 }
 
-// Close 停止后台清理线程。可安全地多次调用。
-func (c *Client) Close() {
-	c.once.Do(func() {
-		close(c.stop)
-	})
+// Cancel 取消指定 seq 的等待，关闭通道以唤醒等待者。
+// 如果该 seq 未注册，则不做任何事。
+func (c *Client) Cancel(seq int64) {
+	c.lock.Lock()
+	w, ok := c.waiters[seq]
+	if ok {
+		delete(c.waiters, seq)
+	}
+	c.lock.Unlock()
+
+	if ok {
+		close(w.ch)
+	}
 }

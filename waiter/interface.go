@@ -7,4 +7,5 @@ type Waiter interface {
 	Register(seq int64)
 	Await(seq int64, timeout time.Duration) (*Result, error)
 	Resolve(seq int64, value Result) bool
+	Cancel(seq int64)
 }

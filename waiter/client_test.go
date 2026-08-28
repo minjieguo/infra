@@ -5,39 +5,8 @@ import (
 	"time"
 )
 
-func TestRegisterExpiresAutomatically(t *testing.T) {
-	c := New()
-	defer c.Close()
-
-	c.Register(1)
-
-	// 手动将 deadline 置为过去，模拟已过期。
-	c.lock.Lock()
-	c.waiters[1].deadline = time.Now().Add(-time.Second)
-	c.lock.Unlock()
-
-	// 触发一次清理，注册应被销毁。
-	c.purge(time.Now())
-
-	c.lock.Lock()
-	_, exists := c.waiters[1]
-	c.lock.Unlock()
-
-	if exists {
-		t.Fatalf("expected expired registration to be removed")
-	}
-
-	if _, err := c.Await(1, time.Second); err == nil {
-		t.Fatalf("expected error for expired registration")
-	}
-	if c.Resolve(1, Result{Data: "x"}) {
-		t.Fatalf("expected Resolve to return false for expired registration")
-	}
-}
-
 func TestAwaitThenResolve(t *testing.T) {
 	c := New()
-	defer c.Close()
 
 	c.Register(1)
 
@@ -72,7 +41,6 @@ func TestAwaitThenResolve(t *testing.T) {
 
 func TestAwaitTimeout(t *testing.T) {
 	c := New()
-	defer c.Close()
 
 	c.Register(1)
 	_, err := c.Await(1, 10*time.Millisecond)
@@ -90,7 +58,6 @@ func TestAwaitTimeout(t *testing.T) {
 
 func TestAwaitUnregistered(t *testing.T) {
 	c := New()
-	defer c.Close()
 	if _, err := c.Await(42, time.Second); err == nil {
 		t.Fatal("expected error for unregistered seq")
 	}
@@ -98,14 +65,56 @@ func TestAwaitUnregistered(t *testing.T) {
 
 func TestAwaitZeroSeq(t *testing.T) {
 	c := New()
-	defer c.Close()
 	if _, err := c.Await(0, time.Second); err == nil || err.Error() != "seq can not be 0" {
 		t.Fatalf("expected seq zero error, got %v", err)
 	}
 }
 
-func TestCloseIdempotent(t *testing.T) {
+func TestCancelWakesAwait(t *testing.T) {
 	c := New()
-	c.Close()
-	c.Close() // 不应 panic
+
+	c.Register(1)
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := c.Await(1, time.Second)
+		errCh <- err
+	}()
+
+	time.Sleep(10 * time.Millisecond)
+
+	c.Cancel(1)
+
+	select {
+	case err := <-errCh:
+		if err == nil || err.Error() != "channel closed" {
+			t.Fatalf("expected 'channel closed' error, got %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for Await to return after Cancel")
+	}
+
+	// Cancel 后注册应被清除。
+	c.lock.Lock()
+	_, exists := c.waiters[1]
+	c.lock.Unlock()
+	if exists {
+		t.Fatalf("expected registration removed after Cancel")
+	}
+}
+
+func TestCancelUnregistered(t *testing.T) {
+	c := New()
+	c.Cancel(42) // 不应 panic
+}
+
+func TestResolveAfterCancel(t *testing.T) {
+	c := New()
+
+	c.Register(1)
+	c.Cancel(1)
+
+	if c.Resolve(1, Result{Data: "x"}) {
+		t.Fatalf("expected Resolve to return false after Cancel")
+	}
 }
