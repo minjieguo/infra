@@ -86,9 +86,9 @@ func (c *Client) Resolve(seq int64, value Result) bool {
 	return true
 }
 
-// Cancel 取消指定 seq 的等待，关闭通道以唤醒等待者。
+// Close 关闭指定 seq 的等待，关闭通道以唤醒等待者。
 // 如果该 seq 未注册，则不做任何事。
-func (c *Client) Cancel(seq int64) {
+func (c *Client) Close(seq int64) {
 	c.lock.Lock()
 	w, ok := c.waiters[seq]
 	if ok {

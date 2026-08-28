@@ -83,7 +83,7 @@ func TestCancelWakesAwait(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 
-	c.Cancel(1)
+	c.Close(1)
 
 	select {
 	case err := <-errCh:
@@ -105,14 +105,14 @@ func TestCancelWakesAwait(t *testing.T) {
 
 func TestCancelUnregistered(t *testing.T) {
 	c := New()
-	c.Cancel(42) // 不应 panic
+	c.Close(42) // 不应 panic
 }
 
 func TestResolveAfterCancel(t *testing.T) {
 	c := New()
 
 	c.Register(1)
-	c.Cancel(1)
+	c.Close(1)
 
 	if c.Resolve(1, Result{Data: "x"}) {
 		t.Fatalf("expected Resolve to return false after Cancel")
