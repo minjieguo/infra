@@ -33,15 +33,15 @@ func (s *redisStore) Set(ctx context.Context, key string, value string, ttl time
 	return s.client.Set(ctx, s.key(key), value, ttl).Err()
 }
 
-func (s *redisStore) Get(ctx context.Context, key string) (string, bool, error) {
+func (s *redisStore) Get(ctx context.Context, key string) (string, error) {
 	value, err := s.client.Get(ctx, s.key(key)).Result()
 	if errors.Is(err, redis.Nil) {
-		return "", false, nil
+		return "", nil
 	}
 	if err != nil {
-		return "", false, err
+		return "", err
 	}
-	return value, true, nil
+	return value, nil
 }
 
 func (s *redisStore) Delete(ctx context.Context, key string) error {

@@ -2,10 +2,14 @@ package cache
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 )
+
+// ErrCacheMiss 表示缓存未命中。
+var ErrCacheMiss = errors.New("cache miss")
 
 const (
 	TypeMemory = "memory"
@@ -57,10 +61,10 @@ func (c *Client) Set(ctx context.Context, key string, value string, ttl time.Dur
 	return c.store.Set(ctx, key, value, ttl)
 }
 
-// Get 读取缓存。
-func (c *Client) Get(ctx context.Context, key string) (string, bool, error) {
+// Get 读取缓存。未命中返回 ("", nil)。
+func (c *Client) Get(ctx context.Context, key string) (string, error) {
 	if c == nil || c.store == nil {
-		return "", false, fmt.Errorf("cache is not initialized")
+		return "", fmt.Errorf("cache is not initialized")
 	}
 	return c.store.Get(ctx, key)
 }

@@ -22,16 +22,16 @@ func (s *memoryStore) Set(_ context.Context, key string, value string, ttl time.
 	return nil
 }
 
-func (s *memoryStore) Get(_ context.Context, key string) (string, bool, error) {
+func (s *memoryStore) Get(_ context.Context, key string) (string, error) {
 	value, ok := s.client.Get(key)
 	if !ok {
-		return "", false, nil
+		return "", nil
 	}
 	text, ok := value.(string)
 	if !ok {
-		return "", false, nil
+		return "", nil
 	}
-	return text, true, nil
+	return text, nil
 }
 
 func (s *memoryStore) Delete(_ context.Context, key string) error {
