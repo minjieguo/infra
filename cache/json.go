@@ -17,13 +17,15 @@ func (c *Client) SetJSON(ctx context.Context, key string, value any, ttl time.Du
 
 // GetJSON 从缓存读取 JSON 并反序列化为指定类型。
 // 未命中返回 ErrCacheMiss。
-func (c *Client) GetJSON[T any](ctx context.Context, key string, value T) error {
+func (c *Client) GetJSON[T any](ctx context.Context, key string) (*T, error) {
 	text, err := c.Get(ctx, key)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if text == "" {
-		return ErrCacheMiss
+		return nil, ErrCacheMiss
 	}
-	return json.Unmarshal([]byte(text), value)
+	value := new(T)
+	err = json.Unmarshal([]byte(text), value)
+	return value, err
 }
