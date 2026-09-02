@@ -104,7 +104,7 @@ func (c Claims) GetName() string {
 }
 
 // GenerateToken 使用 RSA 私钥签名生成 token。
-func GenerateToken[T any](claims Claims) (string, error) {
+func GenerateToken(claims Claims) (string, error) {
 	key, err := currentPrivateKey()
 	if err != nil {
 		return "", err
