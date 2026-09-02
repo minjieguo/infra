@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -128,6 +129,11 @@ func ParseToken[T any](tokenString string) (*Claims[T], error) {
 
 	// ParseWithClaims 成功时 token.Claims 即传入的 claims 实例
 	return claims, nil
+}
+
+// NewNumericDate 拓展方法
+func NewNumericDate(t time.Time) *jwt.NumericDate {
+	return jwt.NewNumericDate(t)
 }
 
 // ---- 内部工具 ----
