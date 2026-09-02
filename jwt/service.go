@@ -90,21 +90,21 @@ type ClaimsMeta interface {
 	GetName() string
 }
 
-type Claims struct {
+type Claims[T ClaimsMeta] struct {
 	jwt.RegisteredClaims
-	Meta ClaimsMeta `json:"meta"`
+	Meta T `json:"meta"`
 }
 
-func (c Claims) GetID() uint {
+func (c Claims[T]) GetID() uint {
 	return c.Meta.GetID()
 }
 
-func (c Claims) GetName() string {
+func (c Claims[T]) GetName() string {
 	return c.Meta.GetName()
 }
 
 // GenerateToken 使用 RSA 私钥签名生成 token。
-func GenerateToken(claims Claims) (string, error) {
+func GenerateToken[T ClaimsMeta](claims Claims[T]) (string, error) {
 	key, err := currentPrivateKey()
 	if err != nil {
 		return "", err
@@ -114,13 +114,13 @@ func GenerateToken(claims Claims) (string, error) {
 }
 
 // ParseToken 使用 RSA 公钥验签并解析 token。
-func ParseToken(tokenString string) (*Claims, error) {
+func ParseToken[T ClaimsMeta](tokenString string) (*Claims[T], error) {
 	key, err := currentPublicKey()
 	if err != nil {
 		return nil, err
 	}
 
-	claims := &Claims{}
+	claims := &Claims[T]{}
 	token, err := jwt.ParseWithClaims(
 		tokenString,
 		claims,
