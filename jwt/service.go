@@ -85,7 +85,13 @@ func SetPublicKey(pemStr string) error {
 	return nil
 }
 
+type ClaimsFunc interface {
+	GetID() uint
+	GetName() string
+}
+
 type Claims[T any] struct {
+	ClaimsFunc
 	jwt.RegisteredClaims
 	Meta T `json:"meta"`
 }
