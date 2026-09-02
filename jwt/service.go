@@ -85,19 +85,26 @@ func SetPublicKey(pemStr string) error {
 	return nil
 }
 
-type ClaimsFunc interface {
+type ClaimsMeta interface {
 	GetID() uint
 	GetName() string
 }
 
-type Claims[T any] struct {
-	ClaimsFunc
+type Claims struct {
 	jwt.RegisteredClaims
-	Meta T `json:"meta"`
+	Meta ClaimsMeta `json:"meta"`
+}
+
+func (c Claims) GetID() uint {
+	return c.Meta.GetID()
+}
+
+func (c Claims) GetName() string {
+	return c.Meta.GetName()
 }
 
 // GenerateToken 使用 RSA 私钥签名生成 token。
-func GenerateToken[T any](claims Claims[T]) (string, error) {
+func GenerateToken[T any](claims Claims) (string, error) {
 	key, err := currentPrivateKey()
 	if err != nil {
 		return "", err
@@ -107,13 +114,13 @@ func GenerateToken[T any](claims Claims[T]) (string, error) {
 }
 
 // ParseToken 使用 RSA 公钥验签并解析 token。
-func ParseToken[T any](tokenString string) (*Claims[T], error) {
+func ParseToken(tokenString string) (*Claims, error) {
 	key, err := currentPublicKey()
 	if err != nil {
 		return nil, err
 	}
 
-	claims := &Claims[T]{}
+	claims := &Claims{}
 	token, err := jwt.ParseWithClaims(
 		tokenString,
 		claims,
