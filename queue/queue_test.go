@@ -1,16 +1,32 @@
 package queue
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/IBM/sarama"
+	"github.com/minjieguo/infra/internal/testenv"
+	"github.com/twmb/franz-go/pkg/kgo"
+	"github.com/twmb/franz-go/pkg/kmsg"
 )
 
-// 测试用 Kafka 集群地址
-var testBrokers = []string{"115.29.231.154:9092"}
+// 测试用 Kafka 集群地址,从仓库根目录的 .env 读取;
+// 未配置 QUEUE_BROKER 时跳过测试。
+//
+// .env 示例：
+//
+//	QUEUE_BROKER=127.0.0.1:9092
+func testBrokers(t *testing.T) []string {
+	t.Helper()
+
+	broker := testenv.Lookup("QUEUE_BROKER")
+	if broker == "" {
+		t.Skip("未配置 QUEUE_BROKER(参考 .env), 跳过 Kafka 集成测试")
+	}
+	return []string{broker}
+}
 
 // 测试用 Topic：每次运行生成唯一 topic,避免复用之前的消息历史
 func newTestTopic() string {
@@ -24,88 +40,94 @@ func newTestGroup() string {
 	return fmt.Sprintf("test-consumer-group-%d", time.Now().UnixNano())
 }
 
-// testHandler 实现 sarama.ConsumerGroupHandler,用于接收消息
-type testHandler struct {
-	received chan string
-}
+// createTestTopic 通过 admin API 创建 topic(测试 broker 未开启自动建 topic),
+// 若已存在则视为成功。
+func createTestTopic(t *testing.T, broker, topic string) {
+	t.Helper()
 
-func (h *testHandler) Setup(session sarama.ConsumerGroupSession) error {
-	return nil
-}
-
-func (h *testHandler) Cleanup(session sarama.ConsumerGroupSession) error {
-	return nil
-}
-
-func (h *testHandler) ConsumeClaim(
-	session sarama.ConsumerGroupSession,
-	claim sarama.ConsumerGroupClaim,
-) error {
-	for msg := range claim.Messages() {
-		h.received <- string(msg.Value)
-		session.MarkMessage(msg, "")
+	client, err := kgo.NewClient(kgo.SeedBrokers(broker))
+	if err != nil {
+		t.Fatalf("创建 admin 客户端失败: %v", err)
 	}
-	return nil
+	defer client.Close()
+
+	req := kmsg.NewPtrCreateTopicsRequest()
+	reqTopic := kmsg.NewCreateTopicsRequestTopic()
+	reqTopic.Topic = topic
+	reqTopic.NumPartitions = 1
+	reqTopic.ReplicationFactor = 1
+	req.Topics = append(req.Topics, reqTopic)
+
+	resp, err := req.RequestWith(context.Background(), client)
+	if err != nil {
+		t.Fatalf("创建 topic 失败: %v", err)
+	}
+	for _, rt := range resp.Topics {
+		if rt.Topic != topic {
+			continue
+		}
+		// 已存在(TOPIC_ALREADY_EXISTS=36)视为成功。
+		if rt.ErrorCode != 0 && rt.ErrorCode != 36 {
+			msg := ""
+			if rt.ErrorMessage != nil {
+				msg = *rt.ErrorMessage
+			}
+			t.Fatalf("创建 topic 失败: %s", msg)
+		}
+	}
 }
 
-// testProducerConfig 构造测试用生产者配置(需开启 Return.Successes 才能用 SyncProducer)
-func testProducerConfig() *sarama.Config {
-	c := sarama.NewConfig()
-	c.Producer.Return.Successes = true
-	return c
+// newTestHandler 构造把消息内容投递到 channel 的 Handler
+func newTestHandler(received chan string) Handler {
+	return func(_ context.Context, record *kgo.Record) error {
+		received <- string(record.Value)
+		return nil
+	}
 }
 
-// testConsumerConfig 构造测试用消费者配置(从最早 offset 开始,并返回错误)
-func testConsumerConfig() *sarama.Config {
-	c := sarama.NewConfig()
-	c.Consumer.Offsets.Initial = sarama.OffsetOldest
-	c.Consumer.Return.Errors = true
-	return c
+// consumeTestOpts 消费配置:从最早 offset 开始,保证读到本次新发送的消息。
+func consumeTestOpts() []kgo.Opt {
+	return []kgo.Opt{
+		kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()),
+	}
 }
 
 // TestPublishSubscribe 最简单的订阅 + 发布测试：
-// 1. 启动一个消费者组订阅 Topic
-// 2. 通过生产者往同一 Topic 发送一条消息
+// 1. 用同一个 Client 订阅 Topic 并启动消费
+// 2. 通过同一个 Client 往 Topic 发送一条消息
 // 3. 断言消费者能收到该消息
 func TestPublishSubscribe(t *testing.T) {
+	brokers := testBrokers(t)
 	topic := newTestTopic()
+	createTestTopic(t, brokers[0], topic)
 	received := make(chan string, 10)
-	handler := &testHandler{received: received}
 
-	consumer, err := NewConsumer(ConsumeConfig{
-		Brokers: testBrokers,
+	client, err := New(Config{
+		Brokers: brokers,
 		GroupID: newTestGroup(),
-		Topics:  []string{topic},
-		Handler: handler,
-		Config:  testConsumerConfig(),
+		Opts:    consumeTestOpts(),
 	})
 	if err != nil {
-		t.Fatalf("创建消费者失败: %v", err)
+		t.Fatalf("创建客户端失败: %v", err)
 	}
-	defer consumer.Close()
+	defer client.Close()
 
-	producer, err := NewProducer(ProducerConfig{
-		Brokers: testBrokers,
-		Config:  testProducerConfig(),
-	})
-	if err != nil {
-		t.Fatalf("创建生产者失败: %v", err)
+	if err := client.Consume(newTestHandler(received), topic); err != nil {
+		t.Fatalf("启动消费失败: %v", err)
 	}
-	defer producer.Close()
 
 	time.Sleep(3 * time.Second)
 
 	payload := fmt.Sprintf("hello kafka test-%d", time.Now().UnixNano())
-	_, _, err = producer.SendMessage(&sarama.ProducerMessage{
+	if _, _, err := client.Send(context.Background(), &kgo.Record{
 		Topic: topic,
-		Value: sarama.ByteEncoder(payload),
-	})
-	if err != nil {
+		Value: []byte(payload),
+	}); err != nil {
 		t.Fatalf("发送消息失败: %v", err)
 	}
 	t.Logf("消息已发送: %s", payload)
 
-	// 5. 等待消费者确认收到消息（带超时）
+	// 等待消费者确认收到消息（带超时）
 	select {
 	case got := <-received:
 		if got != payload {
@@ -120,30 +142,24 @@ func TestPublishSubscribe(t *testing.T) {
 // TestPublishSubscribeConcurrent 并发发布多条消息，验证都能被消费到
 func TestPublishSubscribeConcurrent(t *testing.T) {
 	const msgCount = 10
+	brokers := testBrokers(t)
 	topic := newTestTopic()
+	createTestTopic(t, brokers[0], topic)
 	received := make(chan string, msgCount)
-	handler := &testHandler{received: received}
 
-	consumer, err := NewConsumer(ConsumeConfig{
-		Brokers: testBrokers,
+	client, err := New(Config{
+		Brokers: brokers,
 		GroupID: newTestGroup(),
-		Topics:  []string{topic},
-		Handler: handler,
-		Config:  testConsumerConfig(),
+		Opts:    consumeTestOpts(),
 	})
 	if err != nil {
-		t.Fatalf("创建消费者失败: %v", err)
+		t.Fatalf("创建客户端失败: %v", err)
 	}
-	defer consumer.Close()
+	defer client.Close()
 
-	producer, err := NewProducer(ProducerConfig{
-		Brokers: testBrokers,
-		Config:  testProducerConfig(),
-	})
-	if err != nil {
-		t.Fatalf("创建生产者失败: %v", err)
+	if err := client.Consume(newTestHandler(received), topic); err != nil {
+		t.Fatalf("启动消费失败: %v", err)
 	}
-	defer producer.Close()
 
 	time.Sleep(3 * time.Second)
 
@@ -153,14 +169,13 @@ func TestPublishSubscribeConcurrent(t *testing.T) {
 		go func(i int) {
 			defer sendWg.Done()
 			payload := fmt.Sprintf("msg-%d-%d", i, time.Now().UnixNano())
-			_, _, err := producer.SendMessage(&sarama.ProducerMessage{
+			_, _, err := client.Send(context.Background(), &kgo.Record{
 				Topic: topic,
-				Value: sarama.ByteEncoder(payload),
+				Value: []byte(payload),
 			})
 			if err != nil {
 				t.Errorf("发送消息[%d]失败: %v", i, err)
 			}
-			received <- payload
 		}(i)
 	}
 	sendWg.Wait()
