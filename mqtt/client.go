@@ -65,7 +65,7 @@ func New(cfg Config) (*Client, error) {
 			go mqttClient.resubscribe(cm)
 		},
 		OnConnectError: func(err error) {
-			mqttClient.logger.Error("MQTT Connection Error:%s", zap.Error(err))
+			mqttClient.logger.Error("MQTT Connection Error", zap.Error(err))
 		},
 		ClientID: fmt.Sprintf("go_mqtt_client_%d", time.Now().UnixMilli()),
 		OnPublishReceived: []func(pr paho.PublishReceived) (bool, error){
@@ -88,7 +88,7 @@ func New(cfg Config) (*Client, error) {
 	waitCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	if err = mqttClient.client.AwaitConnection(waitCtx); err != nil {
-		mqttClient.logger.Warn("MQTT Initial Connection Timeout, will keep reconnecting in background: %s", zap.Error(err))
+		mqttClient.logger.Warn("MQTT Initial Connection Timeout, will keep reconnecting in background", zap.Error(err))
 	}
 
 	return mqttClient, nil
@@ -123,7 +123,7 @@ func (c *Client) Subscribe(topic string, qos byte) error {
 	})
 	if err != nil {
 		// 连接可能尚未建立, 此时订阅会在重连后由 resubscribe 补上。
-		c.logger.Warn("MQTT Subscribe Failed (will retry on reconnect): %s", zap.Error(err))
+		c.logger.Warn("MQTT Subscribe Failed (will retry on reconnect)", zap.Error(err))
 		return err
 	}
 	return nil
@@ -162,10 +162,10 @@ func (c *Client) resubscribe(cm *autopaho.ConnectionManager) {
 	c.mu.Unlock()
 
 	if _, err := cm.Subscribe(context.Background(), &paho.Subscribe{Subscriptions: subs}); err != nil {
-		c.logger.Error("MQTT Resubscribe Failed: %s", zap.Error(err))
+		c.logger.Error("MQTT Resubscribe Failed", zap.Error(err))
 		return
 	}
-	c.logger.Info("MQTT Resubscribed: %d topic(s)", zap.Int("count", len(subs)))
+	c.logger.Info("MQTT Subscribed", zap.Int("count", len(subs)))
 }
 
 // Publish 发布消息
