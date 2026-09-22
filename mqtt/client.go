@@ -14,14 +14,18 @@ import (
 	"go.uber.org/zap"
 )
 
+// 消息接收事件
+type ReceiveHandler func(string, []byte) (bool, error)
+
 // Config MQTT 配置
 type Config struct {
-	Host           string                             // 主机或IP地址
-	Port           int                                // 端口 默认1883
-	Username       string                             // 用户名,可为空
-	Password       string                             // 密码,可为空
-	ReceiveHandler func(string, []byte) (bool, error) // 消息接收事件
-	Logger         logger.Logger                      // 日志
+	Host           string         // 主机或IP地址
+	Port           int            // 端口 默认1883
+	Username       string         // 用户名,可为空
+	Password       string         // 密码,可为空
+	ReceiveHandler ReceiveHandler // 消息接收事件
+	Router         *Router        // 路由模式
+	Logger         logger.Logger  // 日志
 }
 
 // Client MQTT 客户端。
@@ -73,6 +77,10 @@ func New(cfg Config) (*Client, error) {
 				if pr.Packet == nil {
 					return true, nil
 				}
+				if cfg.Router != nil {
+					cfg.Router.Route(pr.Packet.Packet())
+				}
+
 				if cfg.ReceiveHandler != nil {
 					return cfg.ReceiveHandler(pr.Packet.Topic, pr.Packet.Payload)
 				}
