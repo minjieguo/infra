@@ -169,18 +169,34 @@ func (c *Client) resubscribe(cm *autopaho.ConnectionManager) {
 }
 
 // Publish 发布消息
-func (c *Client) Publish(topic string, payload []byte, qos byte, retain bool) error {
+func (c *Client) Publish(topic string, payload []byte, qos byte, retain bool, properties *paho.PublishProperties) error {
 	if c == nil || c.client == nil {
 		return errors.New("client not initialized")
 	}
 	_, err := c.client.Publish(context.Background(), &paho.Publish{
-		Topic:   topic,
-		QoS:     qos,
-		Retain:  retain,
-		Payload: payload,
+		Topic:      topic,
+		QoS:        qos,
+		Retain:     retain,
+		Payload:    payload,
+		Properties: properties,
 	})
 	if err != nil {
 		return err
 	}
 	return nil
+}
+
+// PublishViaQueue 发布队列消息
+func (c *Client) PublishViaQueue(topic string, payload []byte, qos byte, retain bool, properties *paho.PublishProperties) error {
+	if c == nil || c.client == nil {
+		return errors.New("client not initialized")
+	}
+	return c.client.PublishViaQueue(context.Background(), &autopaho.QueuePublish{
+		Publish: &paho.Publish{Topic: topic,
+			QoS:        qos,
+			Retain:     retain,
+			Payload:    payload,
+			Properties: properties,
+		},
+	})
 }
