@@ -2,9 +2,10 @@ package database
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/glebarez/sqlite"
-	infralogger "github.com/minjieguo/infra/logger"
+	"github.com/minjieguo/infra/logger"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/schema"
@@ -15,7 +16,7 @@ type Config struct {
 	Type   string
 	DSN    string
 	Debug  bool
-	Logger infralogger.Logger
+	Logger logger.Logger
 }
 
 // Client 数据库客户端。
@@ -41,6 +42,7 @@ func New(cfg Config) (*Client, error) {
 		DisableForeignKeyConstraintWhenMigrating: true,
 		NamingStrategy:                           schema.NamingStrategy{SingularTable: true},
 		Logger:                                   newLogger(cfg.Logger, cfg.Debug),
+		NowFunc:                                  func() time.Time { return time.Now().UTC() },
 	})
 	if err != nil {
 		return nil, fmt.Errorf("连接数据库失败: %w", err)
