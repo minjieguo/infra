@@ -3,17 +3,53 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage:
+用法:
   scripts/release-push.sh [patch|minor|major] [remote]
 
-Examples:
-  scripts/release-push.sh
-  scripts/release-push.sh minor
-  scripts/release-push.sh patch origin
+说明:
+  基于当前最新的语义化版本 tag, 递增出下一个版本号并打 tag,
+  随后推送当前分支与所有 tag。
 
-Creates the next semantic version tag and pushes the current branch plus tags.
-Default bump: patch
-Default remote: origin
+  参数1 版本递增量 (可省略, 默认 patch):
+    patch   修订号 +1, 适用于 Bug 修复、小幅调整
+    minor   次版本号 +1 并清零修订号, 适用于新增功能(向后兼容)
+    major   主版本号 +1 并清零次版本与修订, 适用于不兼容的变更
+
+  参数2 远程仓库名 (可省略, 默认 origin)
+
+  递增规则示例 (假设当前最新 tag 为 v0.0.30):
+    patch   v0.0.30 -> v0.0.31
+    minor   v0.0.30 -> v0.1.0
+    major   v0.0.30 -> v1.0.0
+
+    再假设当前最新 tag 为 v1.2.9:
+    patch   v1.2.9  -> v1.2.10
+    minor   v1.2.9  -> v1.3.0
+    major   v1.2.9  -> v2.0.0
+
+示例:
+  scripts/release-push.sh
+      等价于 patch + origin, 将 v0.0.30 递增为 v0.0.31
+
+  scripts/release-push.sh patch
+      只发修订版, 将 v0.0.30 递增为 v0.0.31
+
+  scripts/release-push.sh minor
+      只发次版本, 将 v0.0.30 递增为 v0.1.0
+
+  scripts/release-push.sh major
+      只发主版本, 将 v0.0.30 递增为 v1.0.0
+
+  scripts/release-push.sh patch origin
+      显式指定 patch 与远程仓库 origin
+
+  scripts/release-push.sh minor upstream
+      递增次版本, 并推送到远程仓库 upstream
+
+注意:
+  - 工作区必须干净(无未提交变更), 且需处于某个分支上。
+  - 生成的 tag 若已存在, 脚本会报错退出。
+  - 运行前会自动 fetch 远程 tag, 版本号以远程最新 tag 为准。
 USAGE
 }
 
