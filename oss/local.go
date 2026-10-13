@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
 // localClient 本地磁盘存储实现。
@@ -34,7 +33,9 @@ func NewLocalClient(cfg Config) (Storage, error) {
 	}, nil
 }
 
-// SaveFile 保存文件到本地磁盘, 返回生成的文件名。
+// SaveFile 保存文件到本地磁盘, 返回生成的雪花 ID 文件名。
+//
+// 文件名规则: {雪花ID}.{suffix}; 不再拼接日期目录, 目录层级完全以入参 path 为准。
 func (c *localClient) SaveFile(path string, suffix, b64 string) (string, error) {
 
 	data, err := base64.StdEncoding.DecodeString(b64)
@@ -42,10 +43,13 @@ func (c *localClient) SaveFile(path string, suffix, b64 string) (string, error) 
 		return "", fmt.Errorf("解码失败: %v\n", err)
 	}
 
-	monthPath := time.Now().Format("200601")
-	fileName := fmt.Sprintf("%s_%d.%s", monthPath, time.Now().UnixNano(), suffix)
+	id, err := snowflakeID()
+	if err != nil {
+		return "", fmt.Errorf("生成文件名失败: %v", err)
+	}
+	fileName := fmt.Sprintf("%s.%s", id, suffix)
 
-	directory := filepath.Join(c.baseDir, path, monthPath)
+	directory := filepath.Join(c.baseDir, path)
 
 	// 检查目录是否存在，不存在则创建
 	if _, err := os.Stat(directory); os.IsNotExist(err) {
@@ -76,7 +80,7 @@ func (c *localClient) GetFileUrl(path, name string) string {
 	if dir != "" {
 		dir += "/"
 	}
-	return c.baseURL + "/" + dir + normalizeSlash(path) + "/" + strings.Split(name, "_")[0] + "/" + name
+	return c.baseURL + "/" + dir + normalizeSlash(path) + "/" + name
 }
 
 // DelFile 删除本地文件。
@@ -85,7 +89,7 @@ func (c *localClient) DelFile(path, name string) {
 		return
 	}
 
-	filePath := filepath.Join(c.baseDir, path, strings.Split(name, "_")[0], name)
+	filePath := filepath.Join(c.baseDir, path, name)
 
 	os.Remove(filePath)
 }

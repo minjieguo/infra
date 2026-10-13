@@ -8,6 +8,7 @@ import (
 	"image/color"
 	"image/png"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/minjieguo/infra/internal/testenv"
@@ -18,29 +19,29 @@ import (
 //
 // .env 示例：
 //
-//	OSS_ENDPOINT=oss-cn-hangzhou.aliyuncs.com
-//	OSS_REGION=cn-hangzhou
-//	OSS_BUCKET=your-bucket
-//	OSS_ACCESS_ID=your-access-key-id
-//	OSS_ACCESS_SECRET=your-access-key-secret
+//	OSS_ALIYUN_ENDPOINT=oss-cn-hangzhou.aliyuncs.com
+//	OSS_ALIYUN_REGION=cn-hangzhou
+//	OSS_ALIYUN_BUCKET=your-bucket
+//	OSS_ALIYUN_ACCESS_ID=your-access-key-id
+//	OSS_ALIYUN_ACCESS_SECRET=your-access-key-secret
 //	OSS_BASE_URL=            # 可选, 文件访问前缀(CDN/自定义域名)
 //	OSS_BASE_DIR=infra-test
 func aliyunTestConfig(t *testing.T) Config {
 	t.Helper()
 
-	endpoint := testenv.Lookup("OSS_ENDPOINT")
-	bucket := testenv.Lookup("OSS_BUCKET")
-	accessID := testenv.Lookup("OSS_ACCESS_ID")
-	secret := testenv.Lookup("OSS_ACCESS_SECRET")
+	endpoint := testenv.Lookup("OSS_ALIYUN_ENDPOINT")
+	bucket := testenv.Lookup("OSS_ALIYUN_BUCKET")
+	accessID := testenv.Lookup("OSS_ALIYUN_ACCESS_ID")
+	secret := testenv.Lookup("OSS_ALIYUN_ACCESS_SECRET")
 
 	if endpoint == "" || bucket == "" || accessID == "" || secret == "" {
-		t.Skip("未配置 OSS_ENDPOINT/OSS_BUCKET/OSS_ACCESS_ID/OSS_ACCESS_SECRET(参考 .env), 跳过阿里云 OSS 集成测试")
+		t.Skip("未配置 OSS_ALIYUN_ENDPOINT/OSS_ALIYUN_BUCKET/OSS_ALIYUN_ACCESS_ID/OSS_ALIYUN_ACCESS_SECRET(参考 .env), 跳过阿里云 OSS 集成测试")
 	}
 
 	return Config{
 		Mode:     ModeAliyun,
 		Endpoint: endpoint,
-		Region:   testenv.Lookup("OSS_REGION"),
+		Region:   testenv.Lookup("OSS_ALIYUN_REGION"),
 		Bucket:   bucket,
 		AccessID: accessID,
 		Secret:   secret,
@@ -102,12 +103,15 @@ func TestAliyunSaveFile(t *testing.T) {
 	if name == "" {
 		t.Fatal("SaveFile 返回的文件名为空")
 	}
-	// 文件名规则: {年月}_{UnixNano}.{suffix}, 与本地模式一致
+	// 文件名规则: {雪花ID}.{suffix}, 与本地模式一致
 	if !strings.HasSuffix(name, ".png") {
 		t.Errorf("文件名后缀不符合预期: %s", name)
 	}
-	if len(strings.Split(name, "_")) != 2 {
-		t.Errorf("文件名格式不符合 {年月}_{UnixNano}.{suffix}: %s", name)
+	if strings.Contains(name, "_") {
+		t.Errorf("文件名应为雪花 ID 格式, 不含下划线: %s", name)
+	}
+	if strings.TrimSuffix(name, ".png") == "" {
+		t.Errorf("文件名缺少雪花 ID: %s", name)
 	}
 
 	// 上传后可生成访问地址
@@ -197,7 +201,7 @@ func TestLocalSaveAndDelete(t *testing.T) {
 
 	// BaseURL 尾部斜杠应被裁剪, 拼接结果不含重复斜杠
 	url := client.GetFileUrl("test", name)
-	if strings.Contains(url, "//"+strings.Split(name, "_")[0]) || !strings.HasPrefix(url, "https://cdn.example.com/") {
+	if strings.Contains(url, "//test") || !strings.HasPrefix(url, "https://cdn.example.com/") {
 		t.Errorf("GetFileUrl 结果不符合预期: %s", url)
 	}
 
@@ -253,6 +257,38 @@ func TestTrimScheme(t *testing.T) {
 	}
 }
 
+// TestSnowflakeID 校验雪花 ID 生成器: 唯一且并发安全。
+func TestSnowflakeID(t *testing.T) {
+	const count = 20000
+
+	ids := make([]string, count)
+	var wg sync.WaitGroup
+	for i := 0; i < count; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			id, err := snowflakeID()
+			if err != nil {
+				t.Errorf("生成雪花 ID 失败: %v", err)
+				return
+			}
+			ids[idx] = id
+		}(i)
+	}
+	wg.Wait()
+
+	seen := make(map[string]struct{}, count)
+	for _, id := range ids {
+		if id == "" || id[0] == '-' {
+			t.Fatalf("雪花 ID 应为正整数字符串: %q", id)
+		}
+		if _, ok := seen[id]; ok {
+			t.Fatalf("雪花 ID 重复: %s", id)
+		}
+		seen[id] = struct{}{}
+	}
+}
+
 // TestAliyunObjectKey BaseDir 归一与 object key 拼接。
 //
 // 不依赖真实 OSS 网络, 仅构造客户端校验 key 规则, 因此不受配置缺失影响。
@@ -264,11 +300,11 @@ func TestAliyunObjectKey(t *testing.T) {
 		file    string
 		want    string
 	}{
-		{"普通前缀", "upload", "avatar", "202601_123.png", "upload/avatar/202601/202601_123.png"},
+		{"普通前缀", "upload", "avatar", "1893456000000000001.png", "upload/avatar/1893456000000000001.png"},
 		// 绝对路径与尾部斜杠应被归一, 不产生重复或开头斜杠
-		{"绝对路径前缀", "/upload/photos/", "avatar", "202601_123.png", "upload/photos/avatar/202601/202601_123.png"},
-		{"反斜杠前缀", `upload\photos`, "avatar", "202601_123.png", "upload/photos/avatar/202601/202601_123.png"},
-		{"空前缀", "", "avatar", "202601_123.png", "avatar/202601/202601_123.png"},
+		{"绝对路径前缀", "/upload/photos/", "avatar", "1893456000000000001.png", "upload/photos/avatar/1893456000000000001.png"},
+		{"反斜杠前缀", `upload\photos`, "avatar", "1893456000000000001.png", "upload/photos/avatar/1893456000000000001.png"},
+		{"空前缀", "", "avatar", "1893456000000000001.png", "avatar/1893456000000000001.png"},
 	}
 
 	for _, c := range cases {

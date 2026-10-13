@@ -22,7 +22,7 @@ const aliyunOpTimeout = 30 * time.Second
 // BaseDir 约定: 阿里云 OSS 的 Bucket 为扁平 key-value 结构, 不存在真实目录,
 // 因此 BaseDir 作为全局前缀参与 object key 拼接, 与本地模式语义保持一致:
 //
-//	key = BaseDir + "/" + path + "/" + 年月 + "/" + fileName
+//	key = BaseDir + "/" + path + "/" + fileName
 //
 // 说明:
 //   - BaseDir 允许为空, 表示直接存放于 Bucket 根目录, 故不参与配置必填校验;
@@ -76,22 +76,25 @@ func NewAliyunClient(cfg Config) (Storage, error) {
 
 // SaveFile 上传文件到阿里云 OSS, 返回生成的文件名。
 //
-// 文件名规则与本地模式保持一致: {年月}_{UnixNano}.{suffix}。
+// 文件名规则与本地模式保持一致: {雪花ID}.{suffix}; 目录层级完全以入参 path 为准。
 func (c *aliyunClient) SaveFile(path string, suffix string, b64 string) (string, error) {
 	data, err := base64.StdEncoding.DecodeString(b64)
 	if err != nil {
 		return "", fmt.Errorf("解码失败: %v\n", err)
 	}
 
-	now := time.Now()
-	fileName := fmt.Sprintf("%s_%d.%s", now.Format("200601"), now.UnixNano(), suffix)
+	id, err := snowflakeID()
+	if err != nil {
+		return "", fmt.Errorf("生成文件名失败: %v", err)
+	}
+	fileName := fmt.Sprintf("%s.%s", id, suffix)
 
 	ctx, cancel := context.WithTimeout(context.Background(), aliyunOpTimeout)
 	defer cancel()
 
 	_, err = c.client.PutObject(ctx, &oss.PutObjectRequest{
-		Bucket: oss.Ptr(c.bucket),
-		Key:    oss.Ptr(c.objectKey(path, fileName)),
+		Bucket: new(c.bucket),
+		Key:    new(c.objectKey(path, fileName)),
 		Body:   bytes.NewReader(data),
 	})
 	if err != nil {
@@ -151,9 +154,9 @@ func (c *aliyunClient) objectKey(path, name string) string {
 	if p := normalizeSlash(path); p != "" {
 		segments = append(segments, p)
 	}
-	// 文件名前缀为年月, 与本地模式保持一致, 便于反推目录层级。
+	// 文件名直接拼入, 不额外插入日期层级。
 	if n := strings.ReplaceAll(name, "\\", "/"); n != "" {
-		segments = append(segments, strings.Split(n, "_")[0], n)
+		segments = append(segments, n)
 	}
 	return strings.Join(segments, "/")
 }
