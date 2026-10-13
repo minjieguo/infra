@@ -71,7 +71,7 @@ func (c *localClient) SaveFile(path string, suffix, b64 string) (string, error) 
 }
 
 // GetFileUrl 获取文件访问地址。
-func (c *localClient) GetFileUrl(path, name string) string {
+func (c *localClient) GetFileUrl(name string) string {
 	if name == "" {
 		return ""
 	}
@@ -80,7 +80,7 @@ func (c *localClient) GetFileUrl(path, name string) string {
 	if dir != "" {
 		dir += "/"
 	}
-	return c.baseURL + "/" + dir + normalizeSlash(path) + "/" + name
+	return c.baseURL + "/" + dir + name
 }
 
 // DelFile 删除本地文件。

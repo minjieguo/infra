@@ -108,12 +108,12 @@ func (c *aliyunClient) SaveFile(path string, suffix string, b64 string) (string,
 //
 // 地址前缀优先使用配置的 BaseURL, 未配置时回退为虚拟主机风格域名
 // https://{Bucket}.{Endpoint}/{BaseDir}。
-func (c *aliyunClient) GetFileUrl(path string, name string) string {
+func (c *aliyunClient) GetFileUrl(name string) string {
 	if name == "" {
 		return ""
 	}
 
-	key := c.objectKey(path, name)
+	key := c.objectKey("", name)
 	if c.baseURL != "" {
 		return c.baseURL + "/" + key
 	}

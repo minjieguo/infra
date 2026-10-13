@@ -115,7 +115,7 @@ func TestAliyunSaveFile(t *testing.T) {
 	}
 
 	// 上传后可生成访问地址
-	url := client.GetFileUrl("test", name)
+	url := client.GetFileUrl(name)
 	if url == "" {
 		t.Error("GetFileUrl 返回空地址")
 	}
@@ -151,7 +151,7 @@ func TestLocalSaveImage(t *testing.T) {
 		t.Fatalf("生成的图片不是合法 PNG: %v", err)
 	}
 
-	t.Logf("本地图片: %s (name=%s, size=%s)", client.GetFileUrl("test", name), name, fmt.Sprintf("%dB", len(raw)))
+	t.Logf("本地图片: %s (name=%s, size=%s)", client.GetFileUrl(name), name, fmt.Sprintf("%dB", len(raw)))
 
 	client.DelFile("test", name)
 }
@@ -200,14 +200,17 @@ func TestLocalSaveAndDelete(t *testing.T) {
 	}
 
 	// BaseURL 尾部斜杠应被裁剪, 拼接结果不含重复斜杠
-	url := client.GetFileUrl("test", name)
-	if strings.Contains(url, "//test") || !strings.HasPrefix(url, "https://cdn.example.com/") {
+	url := client.GetFileUrl(name)
+	if strings.Contains(url, "//") && !strings.HasPrefix(url, "https://") {
+		t.Errorf("GetFileUrl 结果包含重复斜杠: %s", url)
+	}
+	if !strings.HasPrefix(url, "https://cdn.example.com/") {
 		t.Errorf("GetFileUrl 结果不符合预期: %s", url)
 	}
 
 	client.DelFile("test", name)
 
-	if url := client.GetFileUrl("test", ""); url != "" {
+	if url := client.GetFileUrl(""); url != "" {
 		t.Errorf("name 为空时应返回空地址, 实际: %s", url)
 	}
 }
