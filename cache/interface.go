@@ -27,4 +27,7 @@ type Cache interface {
 	HMSet(ctx context.Context, key string, values map[string]any) error
 	HExpire(ctx context.Context, key string, ttl time.Duration, fields ...string) error
 	HExpireAt(ctx context.Context, key string, at time.Time, fields ...string) error
+
+	LPush(ctx context.Context, key string, value string) error
+	BRPop(ctx context.Context, key string) (string, error)
 }

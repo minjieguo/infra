@@ -14,12 +14,19 @@ type memoryStore struct {
 
 	mu   sync.RWMutex
 	hash map[string]map[string]string
+
+	queue  map[string][]string      // key -> 元素切片，尾部为 Pop 端
+	wait   map[string]chan struct{} // key -> 唤醒通知(1 缓冲)
+	closed chan struct{}            // 关闭信号，用于唤醒阻塞中的 Pop
 }
 
 func newMemoryStore() *memoryStore {
 	return &memoryStore{
 		client: gocache.New(5*time.Minute, 10*time.Minute),
 		hash:   make(map[string]map[string]string),
+		queue:  make(map[string][]string),
+		wait:   make(map[string]chan struct{}),
+		closed: make(chan struct{}),
 	}
 }
 
@@ -46,6 +53,17 @@ func (s *memoryStore) Delete(_ context.Context, key string) error {
 }
 
 func (s *memoryStore) Close() error {
+	s.mu.Lock()
+	// 用 close 通知所有阻塞中的 Pop 退出,避免 goroutine 泄漏
+	select {
+	case <-s.closed:
+	default:
+		close(s.closed)
+	}
+	s.queue = nil
+	s.wait = nil
+	s.mu.Unlock()
+
 	s.client.Flush()
 	return nil
 }
@@ -224,4 +242,65 @@ func (s *memoryStore) HExpire(_ context.Context, _ string, _ time.Duration, _ ..
 // HExpireAt memory 实现不支持字段级过期，直接返回成功。
 func (s *memoryStore) HExpireAt(_ context.Context, _ string, _ time.Time, _ ...string) error {
 	return nil
+}
+
+// LPush 从队列左侧插入元素(等价 Redis LPUSH)，由 BRPop 从右侧取出。
+func (s *memoryStore) LPush(_ context.Context, key string, value string) error {
+	s.mu.Lock()
+	if s.queue == nil {
+		s.mu.Unlock()
+		return ErrQueueClosed
+	}
+	// 头插，保证与 Redis LPUSH 一致：多次 Push 后 Pop 按先进先出顺序取出
+	s.queue[key] = append([]string{value}, s.queue[key]...)
+	notify := s.wait[key]
+	if notify == nil {
+		notify = make(chan struct{}, 1)
+		s.wait[key] = notify
+	}
+	s.mu.Unlock()
+
+	// 非阻塞唤醒:无等待者时丢弃通知,不会阻塞 Push
+	select {
+	case notify <- struct{}{}:
+	default:
+	}
+	return nil
+}
+
+// BRPop 阻塞等待队列元素;队列为空时挂起,直到有元素入队、ctx 结束或 Close。
+func (s *memoryStore) BRPop(ctx context.Context, key string) (string, error) {
+	for {
+		s.mu.Lock()
+		if s.queue == nil {
+			s.mu.Unlock()
+			return "", ErrQueueClosed
+		}
+		values := s.queue[key]
+		if len(values) > 0 {
+			value := values[len(values)-1]
+			if len(values) == 1 {
+				delete(s.queue, key)
+			} else {
+				s.queue[key] = values[:len(values)-1]
+			}
+			s.mu.Unlock()
+			return value, nil
+		}
+		notify := s.wait[key]
+		if notify == nil {
+			notify = make(chan struct{}, 1)
+			s.wait[key] = notify
+		}
+		s.mu.Unlock()
+
+		select {
+		case <-notify:
+			// 被唤醒后重新判断队列长度,多余唤醒自然消化
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-s.closed:
+			return "", ErrQueueClosed
+		}
+	}
 }

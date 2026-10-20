@@ -190,3 +190,40 @@ func (s *redisStore) HExpireAt(ctx context.Context, key string, at time.Time, fi
 	}
 	return s.client.HExpireAt(ctx, s.key(key), at, fields...).Err()
 }
+
+// queueBlockPollInterval 是 Redis 队列等待元素时的轮询间隔。
+//
+// 不使用 BRPOP 原生阻塞的原因：go-redis 的连接读超时由 Cmd 的 readTimeout 推导，
+// BRPOP(0) 传入 0 会让 cmdTimeout 返回 0，最终读超时变成 noDeadline，
+// 由 ctx 取消触发的 socket 读不会被打断，调用方拿不回控制权。
+// 改成短超时 BRPOP 轮询：既保留了阻塞语义，又保证 ctx 取消/超时能及时返回。
+const queueBlockPollInterval = time.Second
+
+func (s *redisStore) LPush(ctx context.Context, key string, value string) error {
+	return s.client.LPush(ctx, s.key(key), value).Err()
+}
+
+// BRPop 阻塞等待队列右侧元素: 按短超时轮询 BRPOP，ctx 结束或客户端关闭时返回。
+func (s *redisStore) BRPop(ctx context.Context, key string) (string, error) {
+	for {
+		values, err := s.client.BRPop(ctx, queueBlockPollInterval, s.key(key)).Result()
+		switch {
+		case err == nil:
+			if len(values) < 2 {
+				return "", ErrCacheMiss
+			}
+			// values[0] 为 key 名,values[1] 为元素值
+			return values[1], nil
+		case errors.Is(err, redis.Nil):
+			// 轮询窗口内无元素,继续等待
+		case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+			return "", err
+		default:
+			return "", err
+		}
+
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+	}
+}
