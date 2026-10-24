@@ -14,6 +14,9 @@ type memoryStore struct {
 
 	mu   sync.RWMutex
 	hash map[string]map[string]string
+	zset map[string]map[string]float64 // key -> member -> score
+	cnt  map[string]int64              // key -> 计数值，与字符串空间隔离
+	exp  map[string]time.Time          // key -> 过期时间，覆盖 hash/zset/cnt
 
 	queue  map[string][]string      // key -> 元素切片，尾部为 Pop 端
 	wait   map[string]chan struct{} // key -> 唤醒通知(1 缓冲)
@@ -24,6 +27,9 @@ func newMemoryStore() *memoryStore {
 	return &memoryStore{
 		client: gocache.New(5*time.Minute, 10*time.Minute),
 		hash:   make(map[string]map[string]string),
+		zset:   make(map[string]map[string]float64),
+		cnt:    make(map[string]int64),
+		exp:    make(map[string]time.Time),
 		queue:  make(map[string][]string),
 		wait:   make(map[string]chan struct{}),
 		closed: make(chan struct{}),
@@ -60,6 +66,10 @@ func (s *memoryStore) Close() error {
 	default:
 		close(s.closed)
 	}
+	s.hash = nil
+	s.zset = nil
+	s.cnt = nil
+	s.exp = nil
 	s.queue = nil
 	s.wait = nil
 	s.mu.Unlock()

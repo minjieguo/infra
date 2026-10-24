@@ -48,6 +48,52 @@ func (s *redisStore) Delete(ctx context.Context, key string) error {
 	return s.client.Del(ctx, s.key(key)).Err()
 }
 
+func (s *redisStore) DeleteMany(ctx context.Context, keys ...string) error {
+	if len(keys) == 0 {
+		return nil
+	}
+	fullKeys := make([]string, 0, len(keys))
+	for _, key := range keys {
+		fullKeys = append(fullKeys, s.key(key))
+	}
+	return s.client.Del(ctx, fullKeys...).Err()
+}
+
+func (s *redisStore) Exists(ctx context.Context, key string) (bool, error) {
+	count, err := s.client.Exists(ctx, s.key(key)).Result()
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+func (s *redisStore) Expire(ctx context.Context, key string, ttl time.Duration) error {
+	return s.client.Expire(ctx, s.key(key), ttl).Err()
+}
+
+// TTL 返回剩余过期时间：键不存在返回 ErrCacheMiss，无过期时间返回 TTLNoExpire。
+func (s *redisStore) TTL(ctx context.Context, key string) (time.Duration, error) {
+	ttl, err := s.client.TTL(ctx, s.key(key)).Result()
+	if err != nil {
+		return 0, err
+	}
+	if ttl == -2 {
+		return 0, ErrCacheMiss
+	}
+	if ttl == -1 {
+		return TTLNoExpire, nil
+	}
+	return ttl, nil
+}
+
+func (s *redisStore) IncrBy(ctx context.Context, key string, delta int64) (int64, error) {
+	return s.client.IncrBy(ctx, s.key(key), delta).Result()
+}
+
+func (s *redisStore) DecrBy(ctx context.Context, key string, delta int64) (int64, error) {
+	return s.client.DecrBy(ctx, s.key(key), delta).Result()
+}
+
 func (s *redisStore) Close() error {
 	return s.client.Close()
 }
@@ -226,4 +272,103 @@ func (s *redisStore) BRPop(ctx context.Context, key string) (string, error) {
 			return "", err
 		}
 	}
+}
+
+func (s *redisStore) ZAdd(ctx context.Context, key string, members map[string]float64) error {
+	if len(members) == 0 {
+		return nil
+	}
+	items := make([]redis.Z, 0, len(members))
+	for member, score := range members {
+		items = append(items, redis.Z{Score: score, Member: member})
+	}
+	return s.client.ZAdd(ctx, s.key(key), items...).Err()
+}
+
+func (s *redisStore) ZRange(ctx context.Context, key string, start int64, stop int64) ([]ZSetMember, error) {
+	return s.zRange(ctx, key, start, stop, false)
+}
+
+func (s *redisStore) ZRevRange(ctx context.Context, key string, start int64, stop int64) ([]ZSetMember, error) {
+	return s.zRange(ctx, key, start, stop, true)
+}
+
+// zRange 读取有序集合区间，rev 为 true 时按分值降序返回。
+func (s *redisStore) zRange(ctx context.Context, key string, start int64, stop int64, rev bool) ([]ZSetMember, error) {
+	items, err := s.client.ZRangeArgsWithScores(ctx, redis.ZRangeArgs{
+		Key:   s.key(key),
+		Start: start,
+		Stop:  stop,
+		Rev:   rev,
+	}).Result()
+	if err != nil {
+		return nil, err
+	}
+	result := make([]ZSetMember, 0, len(items))
+	for _, item := range items {
+		member, ok := item.Member.(string)
+		if !ok {
+			continue
+		}
+		result = append(result, ZSetMember{Member: member, Score: item.Score})
+	}
+	return result, nil
+}
+
+func (s *redisStore) ZCard(ctx context.Context, key string) (int64, error) {
+	return s.client.ZCard(ctx, s.key(key)).Result()
+}
+
+func (s *redisStore) ZScore(ctx context.Context, key string, member string) (float64, bool, error) {
+	score, err := s.client.ZScore(ctx, s.key(key), member).Result()
+	if errors.Is(err, redis.Nil) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	return score, true, nil
+}
+
+func (s *redisStore) ZIncrBy(ctx context.Context, key string, member string, delta float64) (float64, error) {
+	return s.client.ZIncrBy(ctx, s.key(key), delta, member).Result()
+}
+
+func (s *redisStore) ZRem(ctx context.Context, key string, members ...string) error {
+	if len(members) == 0 {
+		return nil
+	}
+	items := make([]any, 0, len(members))
+	for _, member := range members {
+		items = append(items, member)
+	}
+	return s.client.ZRem(ctx, s.key(key), items...).Err()
+}
+
+func (s *redisStore) ZRank(ctx context.Context, key string, member string) (int64, bool, error) {
+	return s.zRank(ctx, key, member, false)
+}
+
+func (s *redisStore) ZRevRank(ctx context.Context, key string, member string) (int64, bool, error) {
+	return s.zRank(ctx, key, member, true)
+}
+
+// zRank 查询成员名次，rev 为 true 时按分值降序计算。
+func (s *redisStore) zRank(ctx context.Context, key string, member string, rev bool) (int64, bool, error) {
+	var (
+		rank int64
+		err  error
+	)
+	if rev {
+		rank, err = s.client.ZRevRank(ctx, s.key(key), member).Result()
+	} else {
+		rank, err = s.client.ZRank(ctx, s.key(key), member).Result()
+	}
+	if errors.Is(err, redis.Nil) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	return rank, true, nil
 }
