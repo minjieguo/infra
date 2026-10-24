@@ -138,3 +138,74 @@ func (s *memoryStore) ZRevRank(_ context.Context, key string, member string) (in
 	rank, ok := zSetRank(members, member)
 	return rank, ok, nil
 }
+
+func (s *memoryStore) ZRangeByScore(_ context.Context, key string, min float64, max float64, offset int64, count int64) ([]ZSetMember, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	s.expireLocked(key)
+	return sliceZSetByScore(sortZSetMembers(s.zset[key]), min, max, offset, count), nil
+}
+
+func (s *memoryStore) ZRevRangeByScore(_ context.Context, key string, min float64, max float64, offset int64, count int64) ([]ZSetMember, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	s.expireLocked(key)
+
+	// 先按分值过滤再反转，保证 offset/count 作用在降序序列上
+	filtered := filterZSetByScore(sortZSetMembers(s.zset[key]), min, max)
+	return sliceZSetRange(reverseZSetMembers(filtered), offset, count), nil
+}
+
+func (s *memoryStore) ZCount(_ context.Context, key string, min float64, max float64) (int64, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	s.expireLocked(key)
+	members := sliceZSetByScore(sortZSetMembers(s.zset[key]), min, max, 0, 0)
+	return int64(len(members)), nil
+}
+
+func (s *memoryStore) ZRemRangeByScore(_ context.Context, key string, min float64, max float64) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.expireLocked(key)
+	scores, ok := s.zset[key]
+	if !ok || min > max {
+		return 0, nil
+	}
+	var removed int64
+	for member, score := range scores {
+		if score >= min && score <= max {
+			delete(scores, member)
+			removed++
+		}
+	}
+	s.cleanupZSetLocked(key, scores)
+	return removed, nil
+}
+
+func (s *memoryStore) ZRemRangeByRank(_ context.Context, key string, start int64, stop int64) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.expireLocked(key)
+	scores, ok := s.zset[key]
+	if !ok {
+		return 0, nil
+	}
+	targets := sliceZSetMembers(sortZSetMembers(scores), start, stop)
+	for _, item := range targets {
+		delete(scores, item.Member)
+	}
+	s.cleanupZSetLocked(key, scores)
+	return int64(len(targets)), nil
+}
+
+// cleanupZSetLocked 在有序集合被清空时移除 key 及关联的过期台账。
+//
+// 调用方必须已持有 s.mu 写锁。
+func (s *memoryStore) cleanupZSetLocked(key string, scores map[string]float64) {
+	if len(scores) > 0 {
+		return
+	}
+	delete(s.zset, key)
+	delete(s.exp, key)
+}

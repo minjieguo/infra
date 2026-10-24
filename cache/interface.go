@@ -41,10 +41,15 @@ type Cache interface {
 	ZAdd(ctx context.Context, key string, members map[string]float64) error
 	ZRange(ctx context.Context, key string, start int64, stop int64) ([]ZSetMember, error)
 	ZRevRange(ctx context.Context, key string, start int64, stop int64) ([]ZSetMember, error)
+	ZRangeByScore(ctx context.Context, key string, min float64, max float64, offset int64, count int64) ([]ZSetMember, error)
+	ZRevRangeByScore(ctx context.Context, key string, min float64, max float64, offset int64, count int64) ([]ZSetMember, error)
 	ZCard(ctx context.Context, key string) (int64, error)
+	ZCount(ctx context.Context, key string, min float64, max float64) (int64, error)
 	ZScore(ctx context.Context, key string, member string) (float64, bool, error)
 	ZIncrBy(ctx context.Context, key string, member string, delta float64) (float64, error)
 	ZRem(ctx context.Context, key string, members ...string) error
+	ZRemRangeByScore(ctx context.Context, key string, min float64, max float64) (int64, error)
+	ZRemRangeByRank(ctx context.Context, key string, start int64, stop int64) (int64, error)
 	ZRank(ctx context.Context, key string, member string) (int64, bool, error)
 	ZRevRank(ctx context.Context, key string, member string) (int64, bool, error)
 }

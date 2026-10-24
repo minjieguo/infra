@@ -43,12 +43,44 @@ func (c *Client) ZRevRange(ctx context.Context, key string, start int64, stop in
 	return c.store.ZRevRange(ctx, key, start, stop)
 }
 
+// ZRangeByScore 按分值区间升序返回成员。
+//
+// 对应 Redis 的 ZRANGEBYSCORE 命令；min/max 为闭区间，min 大于 max 时返回空切片。
+// offset 为跳过的成员数量，count 为本次最多返回的数量，count <= 0 表示不限制数量；
+// 需要分页时用 offset 配合 count，只需前 N 个时传 offset=0、count=N。
+// 集合不存在时返回空切片。
+func (c *Client) ZRangeByScore(ctx context.Context, key string, min float64, max float64, offset int64, count int64) ([]ZSetMember, error) {
+	if c == nil || c.store == nil {
+		return nil, fmt.Errorf("cache is not initialized")
+	}
+	return c.store.ZRangeByScore(ctx, key, min, max, offset, count)
+}
+
+// ZRevRangeByScore 按分值区间降序返回成员。
+//
+// 对应 Redis 的 ZREVRANGEBYSCORE 命令；min/max 仍按闭区间书写（min 小、max 大），
+// 返回结果按分值从大到小排列，其余语义与 ZRangeByScore 一致。
+func (c *Client) ZRevRangeByScore(ctx context.Context, key string, min float64, max float64, offset int64, count int64) ([]ZSetMember, error) {
+	if c == nil || c.store == nil {
+		return nil, fmt.Errorf("cache is not initialized")
+	}
+	return c.store.ZRevRangeByScore(ctx, key, min, max, offset, count)
+}
+
 // ZCard 返回有序集合的成员数量，集合不存在时返回 0。
 func (c *Client) ZCard(ctx context.Context, key string) (int64, error) {
 	if c == nil || c.store == nil {
 		return 0, fmt.Errorf("cache is not initialized")
 	}
 	return c.store.ZCard(ctx, key)
+}
+
+// ZCount 返回分值落在 [min, max] 闭区间内的成员数量，min 大于 max 时返回 0。
+func (c *Client) ZCount(ctx context.Context, key string, min float64, max float64) (int64, error) {
+	if c == nil || c.store == nil {
+		return 0, fmt.Errorf("cache is not initialized")
+	}
+	return c.store.ZCount(ctx, key, min, max)
 }
 
 // ZScore 返回指定成员的分值，成员不存在时 exists 为 false。
@@ -75,6 +107,27 @@ func (c *Client) ZRem(ctx context.Context, key string, members ...string) error 
 		return fmt.Errorf("cache is not initialized")
 	}
 	return c.store.ZRem(ctx, key, members...)
+}
+
+// ZRemRangeByScore 删除分值落在 [min, max] 闭区间内的成员，返回删除数量。
+//
+// 对应 Redis 的 ZREMRANGEBYSCORE 命令；集合被清空时 key 一并删除。
+func (c *Client) ZRemRangeByScore(ctx context.Context, key string, min float64, max float64) (int64, error) {
+	if c == nil || c.store == nil {
+		return 0, fmt.Errorf("cache is not initialized")
+	}
+	return c.store.ZRemRangeByScore(ctx, key, min, max)
+}
+
+// ZRemRangeByRank 删除名次落在 [start, stop] 区间内的成员，返回删除数量。
+//
+// 对应 Redis 的 ZREMRANGEBYRANK 命令；下标语义与 ZRange 一致（支持负数），
+// 集合被清空时 key 一并删除。
+func (c *Client) ZRemRangeByRank(ctx context.Context, key string, start int64, stop int64) (int64, error) {
+	if c == nil || c.store == nil {
+		return 0, fmt.Errorf("cache is not initialized")
+	}
+	return c.store.ZRemRangeByRank(ctx, key, start, stop)
 }
 
 // ZRank 返回成员按分值升序的名次（从 0 开始），成员不存在时 exists 为 false。
@@ -144,6 +197,60 @@ func reverseZSetMembers(members []ZSetMember) []ZSetMember {
 	result := make([]ZSetMember, size)
 	for i, member := range members {
 		result[size-1-i] = member
+	}
+	return result
+}
+
+// sliceZSetByScore 从升序成员切片中取分值落在 [min, max] 闭区间的部分。
+//
+// 使用二分定位边界，offset 为跳过的成员数，count <= 0 表示不限制数量；
+// min 大于 max 或区间内无成员时返回空切片。
+func sliceZSetByScore(members []ZSetMember, min float64, max float64, offset int64, count int64) []ZSetMember {
+	if min > max {
+		return []ZSetMember{}
+	}
+	// 找第一个 score >= min 的位置
+	from := sort.Search(len(members), func(i int) bool {
+		return members[i].Score >= min
+	})
+	// 找第一个 score > max 的位置
+	to := sort.Search(len(members), func(i int) bool {
+		return members[i].Score > max
+	})
+	if from >= to {
+		return []ZSetMember{}
+	}
+	return sliceZSetRange(members[from:to], offset, count)
+}
+
+// sliceZSetRange 按 offset/count 裁剪成员切片，count <= 0 表示不限制数量。
+func sliceZSetRange(members []ZSetMember, offset int64, count int64) []ZSetMember {
+	if offset < 0 {
+		offset = 0
+	}
+	size := int64(len(members))
+	if offset >= size {
+		return []ZSetMember{}
+	}
+	end := size
+	if count > 0 && offset+count < size {
+		end = offset + count
+	}
+	result := make([]ZSetMember, end-offset)
+	copy(result, members[offset:end])
+	return result
+}
+
+// filterZSetByScore 过滤出分值落在 [min, max] 闭区间的成员。
+func filterZSetByScore(members []ZSetMember, min float64, max float64) []ZSetMember {
+	if min > max {
+		return []ZSetMember{}
+	}
+	result := make([]ZSetMember, 0, len(members))
+	for _, item := range members {
+		if item.Score >= min && item.Score <= max {
+			result = append(result, item)
+		}
 	}
 	return result
 }

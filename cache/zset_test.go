@@ -175,3 +175,124 @@ func TestZSetRedis(t *testing.T) {
 	runZSetCases(t, newTestRedisClient(t))
 	t.Log("Redis 后端 ZSet 测试通过")
 }
+
+// runZSetScoreRangeCases 验证分值区间查询与区间删除在各后端的一致行为。
+func runZSetScoreRangeCases(t *testing.T, client *Client) {
+	t.Helper()
+
+	ctx := context.Background()
+	key := testZSetKey()
+
+	// 分值与成员：a=1 b=2 c=3 d=4 e=5，另加同分的 f=3
+	if err := client.ZAdd(ctx, key, map[string]float64{
+		"a": 1,
+		"b": 2,
+		"c": 3,
+		"d": 4,
+		"e": 5,
+		"f": 3,
+	}); err != nil {
+		t.Fatalf("ZAdd 失败: %v", err)
+	}
+
+	// 闭区间查询：3 分包含 c 与 f
+	got, err := client.ZRangeByScore(ctx, key, 2, 4, 0, 0)
+	if err != nil {
+		t.Fatalf("ZRangeByScore 失败: %v", err)
+	}
+	assertMembers(t, "ZRangeByScore [2,4]", got, []string{"b:2", "c:3", "f:3", "d:4"})
+
+	// 降序查询，min/max 仍按小到大书写
+	rev, err := client.ZRevRangeByScore(ctx, key, 2, 4, 0, 0)
+	if err != nil {
+		t.Fatalf("ZRevRangeByScore 失败: %v", err)
+	}
+	assertMembers(t, "ZRevRangeByScore [2,4]", rev, []string{"d:4", "f:3", "c:3", "b:2"})
+
+	// offset/count 分页
+	paged, err := client.ZRangeByScore(ctx, key, 1, 5, 1, 2)
+	if err != nil {
+		t.Fatalf("ZRangeByScore 分页失败: %v", err)
+	}
+	assertMembers(t, "ZRangeByScore offset=1 count=2", paged, []string{"b:2", "c:3"})
+
+	revPaged, err := client.ZRevRangeByScore(ctx, key, 1, 5, 1, 2)
+	if err != nil {
+		t.Fatalf("ZRevRangeByScore 分页失败: %v", err)
+	}
+	assertMembers(t, "ZRevRangeByScore offset=1 count=2", revPaged, []string{"d:4", "f:3"})
+
+	// offset 越界返回空
+	empty, err := client.ZRangeByScore(ctx, key, 1, 5, 100, 10)
+	if err != nil {
+		t.Fatalf("ZRangeByScore 越界失败: %v", err)
+	}
+	if len(empty) != 0 {
+		t.Fatalf("offset 越界应返回空切片, 实际: %v", zsetMembersToStrings(empty))
+	}
+
+	// min > max 返回空
+	invalid, err := client.ZRangeByScore(ctx, key, 5, 1, 0, 0)
+	if err != nil {
+		t.Fatalf("ZRangeByScore 非法区间失败: %v", err)
+	}
+	if len(invalid) != 0 {
+		t.Fatalf("min>max 应返回空切片, 实际: %v", zsetMembersToStrings(invalid))
+	}
+
+	// 计数
+	if count, err := client.ZCount(ctx, key, 2, 4); err != nil || count != 4 {
+		t.Fatalf("ZCount 不匹配: count=%d err=%v", count, err)
+	}
+	if count, err := client.ZCount(ctx, key, 10, 20); err != nil || count != 0 {
+		t.Fatalf("ZCount 空区间应为 0: count=%d err=%v", count, err)
+	}
+
+	// 按分值删除
+	removed, err := client.ZRemRangeByScore(ctx, key, 3, 3)
+	if err != nil {
+		t.Fatalf("ZRemRangeByScore 失败: %v", err)
+	}
+	if removed != 2 {
+		t.Fatalf("ZRemRangeByScore 删除数量不匹配: want=2 got=%d", removed)
+	}
+	remaining, err := client.ZRange(ctx, key, 0, -1)
+	if err != nil {
+		t.Fatalf("ZRange 失败: %v", err)
+	}
+	assertMembers(t, "ZRemRangeByScore 后剩余", remaining, []string{"a:1", "b:2", "d:4", "e:5"})
+
+	// 按名次删除：保留前两个
+	removed, err = client.ZRemRangeByRank(ctx, key, 2, -1)
+	if err != nil {
+		t.Fatalf("ZRemRangeByRank 失败: %v", err)
+	}
+	if removed != 2 {
+		t.Fatalf("ZRemRangeByRank 删除数量不匹配: want=2 got=%d", removed)
+	}
+	remaining, err = client.ZRange(ctx, key, 0, -1)
+	if err != nil {
+		t.Fatalf("ZRange 失败: %v", err)
+	}
+	assertMembers(t, "ZRemRangeByRank 后剩余", remaining, []string{"a:1", "b:2"})
+
+	// 删除全部后 key 消失
+	if _, err := client.ZRemRangeByRank(ctx, key, 0, -1); err != nil {
+		t.Fatalf("ZRemRangeByRank 全量失败: %v", err)
+	}
+	if exists, err := client.Exists(ctx, key); err != nil || exists {
+		t.Fatalf("清空后 key 应不存在: exists=%v err=%v", exists, err)
+	}
+}
+
+// TestZSetScoreRangeMemory 验证内存后端的分值区间查询与区间删除。
+func TestZSetScoreRangeMemory(t *testing.T) {
+	runZSetScoreRangeCases(t, newTestMemoryClient(t))
+	t.Log("内存后端 ZSet 分值区间测试通过")
+}
+
+// TestZSetScoreRangeRedis 验证 Redis 后端的分值区间查询与区间删除。
+func TestZSetScoreRangeRedis(t *testing.T) {
+	runZSetScoreRangeCases(t, newTestRedisClient(t))
+	t.Log("Redis 后端 ZSet 分值区间测试通过")
+}

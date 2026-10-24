@@ -3,6 +3,7 @@ package cache
 import (
 	"context"
 	"errors"
+	"strconv"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -371,4 +372,78 @@ func (s *redisStore) zRank(ctx context.Context, key string, member string, rev b
 		return 0, false, err
 	}
 	return rank, true, nil
+}
+
+func (s *redisStore) ZRangeByScore(ctx context.Context, key string, min float64, max float64, offset int64, count int64) ([]ZSetMember, error) {
+	if min > max {
+		return []ZSetMember{}, nil
+	}
+	items, err := s.client.ZRangeArgsWithScores(ctx, redis.ZRangeArgs{
+		Key:     s.key(key),
+		Start:   min,
+		Stop:    max,
+		ByScore: true,
+		Offset:  offset,
+		Count:   count,
+	}).Result()
+	if err != nil {
+		return nil, err
+	}
+	return redisZSlices(items), nil
+}
+
+func (s *redisStore) ZRevRangeByScore(ctx context.Context, key string, min float64, max float64, offset int64, count int64) ([]ZSetMember, error) {
+	if min > max {
+		return []ZSetMember{}, nil
+	}
+	// BYSCORE + REV 时 Redis 要求先写高分（max）再写低分（min）
+	items, err := s.client.ZRangeArgsWithScores(ctx, redis.ZRangeArgs{
+		Key:     s.key(key),
+		Start:   max,
+		Stop:    min,
+		ByScore: true,
+		Rev:     true,
+		Offset:  offset,
+		Count:   count,
+	}).Result()
+	if err != nil {
+		return nil, err
+	}
+	return redisZSlices(items), nil
+}
+
+func (s *redisStore) ZCount(ctx context.Context, key string, min float64, max float64) (int64, error) {
+	if min > max {
+		return 0, nil
+	}
+	return s.client.ZCount(ctx, s.key(key), formatScore(min), formatScore(max)).Result()
+}
+
+func (s *redisStore) ZRemRangeByScore(ctx context.Context, key string, min float64, max float64) (int64, error) {
+	if min > max {
+		return 0, nil
+	}
+	return s.client.ZRemRangeByScore(ctx, s.key(key), formatScore(min), formatScore(max)).Result()
+}
+
+func (s *redisStore) ZRemRangeByRank(ctx context.Context, key string, start int64, stop int64) (int64, error) {
+	return s.client.ZRemRangeByRank(ctx, s.key(key), start, stop).Result()
+}
+
+// redisZSlices 将 go-redis 的有序集合结果转换为 ZSetMember 切片。
+func redisZSlices(items []redis.Z) []ZSetMember {
+	result := make([]ZSetMember, 0, len(items))
+	for _, item := range items {
+		member, ok := item.Member.(string)
+		if !ok {
+			continue
+		}
+		result = append(result, ZSetMember{Member: member, Score: item.Score})
+	}
+	return result
+}
+
+// formatScore 将分值格式化为 Redis 分值区间参数，保证浮点数按最短形式传输。
+func formatScore(score float64) string {
+	return strconv.FormatFloat(score, 'g', -1, 64)
 }
