@@ -2,6 +2,8 @@ package database
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/glebarez/sqlite"
@@ -11,12 +13,16 @@ import (
 	"gorm.io/gorm/schema"
 )
 
+// defaultSQLiteDataDir 为 sqlite 数据目录的默认值。
+const defaultSQLiteDataDir = "./data"
+
 // Config 数据库配置
 type Config struct {
-	Type   string
-	DSN    string
-	Debug  bool
-	Logger logger.Logger
+	Type    string
+	DSN     string // sqlite 为数据库文件名, postgres 为完整 DSN
+	DataDir string // sqlite 数据目录, 为空时使用默认值 ./data; postgres 忽略该字段
+	Debug   bool
+	Logger  logger.Logger
 }
 
 // Client 数据库客户端。
@@ -28,7 +34,18 @@ func New(cfg Config) (*Client, error) {
 	var dialector gorm.Dialector
 	switch cfg.Type {
 	case "sqlite":
-		dialector = sqlite.Open("./data/" + cfg.DSN)
+		if cfg.DSN == "" {
+			return nil, fmt.Errorf("sqlite dsn is null")
+		}
+		dataDir := cfg.DataDir
+		if dataDir == "" {
+			dataDir = defaultSQLiteDataDir
+		}
+		// sqlite 驱动不会自动创建父目录, 目录不存在时打开数据库会失败, 因此先确保目录存在。
+		if err := os.MkdirAll(dataDir, 0755); err != nil {
+			return nil, fmt.Errorf("创建数据目录失败: %w", err)
+		}
+		dialector = sqlite.Open(filepath.Join(dataDir, cfg.DSN))
 	case "postgres":
 		if cfg.DSN == "" {
 			return nil, fmt.Errorf("postgres dns is null")
