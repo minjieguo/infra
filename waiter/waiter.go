@@ -8,5 +8,6 @@ type Result struct {
 
 // waiter 一次等待注册。
 type waiter struct {
-	ch chan Result
+	ch       chan Result
+	resolved bool // 由 Client.lock 保护。
 }

@@ -1,6 +1,8 @@
 package waiter
 
 import (
+	"errors"
+	"sync"
 	"testing"
 	"time"
 )
@@ -36,6 +38,72 @@ func TestAwaitThenResolve(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for Await result")
+	}
+}
+
+func TestResolveBeforeAwait(t *testing.T) {
+	c := New()
+	want := Result{Data: "first", Error: errors.New("设备离线")}
+
+	c.Register(1)
+	if !c.Resolve(1, want) {
+		t.Fatal("expected first Resolve to succeed")
+	}
+	c.Register(1)
+	if c.Resolve(1, Result{Data: "second"}) {
+		t.Fatal("expected duplicate Resolve to fail")
+	}
+	got, err := c.Await(1, 0)
+	if err != nil || got == nil || *got != want {
+		t.Fatalf("Await got (%+v, %v), want (%+v, nil)", got, err, want)
+	}
+
+	c.Register(1)
+	if !c.Resolve(1, Result{Data: "new"}) {
+		t.Fatal("expected Resolve to succeed after re-registering")
+	}
+	got, err = c.Await(1, time.Second)
+	if err != nil || got == nil || got.Data != "new" {
+		t.Fatalf("unexpected result after re-registering: (%+v, %v)", got, err)
+	}
+}
+
+func TestResolveConcurrentWithClose(t *testing.T) {
+	c := New()
+	for i := 0; i < 100; i++ {
+		c.Register(1)
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			<-start
+			c.Resolve(1, Result{Data: "hello"})
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			c.Close(1)
+		}()
+		close(start)
+		wg.Wait()
+		if c.Resolve(1, Result{}) {
+			t.Fatal("expected registration removed after Close")
+		}
+	}
+}
+
+func TestAwaitCleanupPreservesNewRegistration(t *testing.T) {
+	c := New()
+	c.Register(1)
+	old := c.waiters[1]
+	c.Close(1)
+	c.Register(1)
+
+	// 模拟旧 Await 在同一序号重新注册后才执行延迟清理。
+	c.removeWaiter(1, old)
+	if !c.Resolve(1, Result{Data: "new"}) {
+		t.Fatal("old Await cleanup removed the new registration")
 	}
 }
 
